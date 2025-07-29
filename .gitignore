@@ -1,3 +1,4 @@
+*.task
 # Gradle files
 .gradle/
 build/
