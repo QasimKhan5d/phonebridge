@@ -1,0 +1,23 @@
+{
+  "title": "Adaptations of a Cactus to Desert Life",
+  "description": "This diagram shows how a cactus has special features that help it survive in a hot, dry desert environment.",
+  "adaptations": [
+    {
+      "name": "Small Surface Area",
+      "details": "The cactus has a small surface area, which helps minimize water loss through evaporation into the air."
+    },
+    {
+      "name": "Spines Instead of Leaves",
+      "details": "Cacti have spines instead of leaves. This reduces the surface area exposed to the sun and wind, minimizing water loss and also provides protection from animals that might eat the cactus."
+    },
+    {
+      "name": "Stems That Can Store Water",
+      "details": "The thick stems of a cactus can store large amounts of water, which the plant uses when there is no rain."
+    },
+    {
+      "name": "Widespread Root System",
+      "details": "The cactus has a widespread root system that spreads out beneath the ground. This allows the plant to absorb water quickly from even small amounts of rainfall."
+    }
+  ],
+  "environment": "Desert - hot and dry with little rainfall."
+}

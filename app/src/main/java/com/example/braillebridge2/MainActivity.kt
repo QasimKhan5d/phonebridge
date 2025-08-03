@@ -15,6 +15,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -26,6 +27,10 @@ import com.example.braillebridge2.chat.ChatViewModel
 import com.example.braillebridge2.chat.LlmModelManager
 import com.example.braillebridge2.chat.LlmModelInstance
 import com.example.braillebridge2.ui.theme.BrailleBridge2Theme
+import com.example.braillebridge2.core.*
+import com.example.braillebridge2.ui.HomeScreen
+import com.example.braillebridge2.ui.HomeworkScreen
+import com.example.braillebridge2.viewmodel.MainViewModel
 import com.google.mediapipe.tasks.genai.llminference.GraphOptions
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
 import com.google.mediapipe.tasks.genai.llminference.LlmInferenceSession
@@ -34,11 +39,10 @@ import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.*
 
-class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
+class MainActivity : ComponentActivity() {
     // Use gallery app pattern for model management
     private val modelManager = LlmModelManager()
-    private var textToSpeech: TextToSpeech? = null
-    private var isTtsInitialized = false
+    private lateinit var ttsHelper: TtsHelper
     private lateinit var modelPath: String
     private var isModelLoaded by mutableStateOf(false)
     
@@ -50,62 +54,21 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
         // Use external files directory like the gallery app does
         modelPath = File(getExternalFilesDir(null), "gemma-3n-E2B-it-int4.task").absolutePath
         
-        // Initialize TTS
-        textToSpeech = TextToSpeech(this, this)
+        // Initialize TTS Helper
+        ttsHelper = TtsHelper(this) {
+            // TTS is ready callback
+        }
         
         // Initialize the LLM inference task on background thread using gallery app pattern
         initializeLlmInferenceAsync()
         
         setContent {
             BrailleBridge2Theme {
-                Scaffold(
-                    modifier = Modifier.fillMaxSize(),
-                    topBar = {
-                        TopAppBar(
-                            title = { 
-                                Text(
-                                    "Braille Bridge Chat",
-                                    fontWeight = FontWeight.Bold
-                                )
-                            },
-                            colors = TopAppBarDefaults.topAppBarColors(
-                                containerColor = MaterialTheme.colorScheme.primaryContainer,
-                                titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                            )
-                        )
-                    }
-                ) { innerPadding ->
-                    ChatMainScreen(
-                        modelManager = modelManager,
-                        isModelLoaded = isModelLoaded,
-                        modelPath = modelPath,
-                        onSpeakText = { text -> speakText(text) },
-                        isTtsReady = isTtsInitialized,
-                        modifier = Modifier.padding(innerPadding)
-                    )
-                }
+                BrailleBridgeApp(
+                    ttsHelper = ttsHelper,
+                    modifier = Modifier.fillMaxSize()
+                )
             }
-        }
-    }
-    
-    override fun onInit(status: Int) {
-        if (status == TextToSpeech.SUCCESS) {
-            val result = textToSpeech?.setLanguage(Locale.US)
-            if (result == TextToSpeech.LANG_MISSING_DATA || result == TextToSpeech.LANG_NOT_SUPPORTED) {
-                Log.e("TTS", "Language not supported")
-            } else {
-                isTtsInitialized = true
-                Log.i("TTS", "TextToSpeech initialized successfully")
-            }
-        } else {
-            Log.e("TTS", "TextToSpeech initialization failed")
-        }
-    }
-    
-    private fun speakText(text: String) {
-        if (isTtsInitialized && textToSpeech != null) {
-            textToSpeech?.speak(text, TextToSpeech.QUEUE_FLUSH, null, null)
-            Log.i("TTS", "Speaking: ${text.take(50)}...")
         }
     }
     
@@ -166,8 +129,7 @@ class MainActivity : ComponentActivity(), TextToSpeech.OnInitListener {
     
     override fun onDestroy() {
         super.onDestroy()
-        textToSpeech?.stop()
-        textToSpeech?.shutdown()
+        ttsHelper.shutdown()
         modelManager.cleanup()
     }
 }
@@ -335,4 +297,55 @@ fun ChatMainScreen(
     }
 }
 
-// Removed preview function as it's no longer needed with the new chat interface
+@Composable
+fun BrailleBridgeApp(
+    ttsHelper: TtsHelper,
+    modifier: Modifier = Modifier
+) {
+    val mainViewModel: MainViewModel = viewModel()
+    val uiState by mainViewModel.uiState.collectAsState()
+    val context = LocalContext.current
+    
+    // Initialize the app when it starts
+    LaunchedEffect(Unit) {
+        mainViewModel.initialize(context)
+    }
+    
+    when (val currentState = uiState) {
+        is AppState.Loading -> {
+            Box(
+                modifier = modifier.fillMaxSize(),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                ) {
+                    CircularProgressIndicator()
+                    Text(
+                        text = "Loading Braille Bridge...",
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                }
+            }
+        }
+        
+        is AppState.Home -> {
+            HomeScreen(
+                state = currentState,
+                viewModel = mainViewModel,
+                ttsHelper = ttsHelper,
+                modifier = modifier
+            )
+        }
+        
+        is AppState.Homework -> {
+            HomeworkScreen(
+                state = currentState,
+                viewModel = mainViewModel,
+                ttsHelper = ttsHelper,
+                modifier = modifier
+            )
+        }
+    }
+}
