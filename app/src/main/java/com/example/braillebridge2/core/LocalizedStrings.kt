@@ -40,6 +40,12 @@ object LocalizedStrings {
         QUESTION_RECORDING_STARTED,
         GEMMA_RESPONDING,
         
+        // Feedback feature
+        FEEDBACK_LISTENING_FOR_COMMAND,
+        FEEDBACK_PREFIX,
+        NO_FEEDBACK_TO_REPEAT,
+        TRANSLATING_FEEDBACK,
+        
         // General
         COULD_NOT_SWITCH_LANGUAGE
     }
@@ -66,6 +72,11 @@ object LocalizedStrings {
         StringKey.QUESTION_RECORDING_STARTED to "Ask your question now. Tap to stop recording.",
         StringKey.GEMMA_RESPONDING to "Responding...",
         
+        StringKey.FEEDBACK_LISTENING_FOR_COMMAND to "Listening for command. Say 'switch', 'repeat', or 'ask'.",
+        StringKey.FEEDBACK_PREFIX to "Feedback",
+        StringKey.NO_FEEDBACK_TO_REPEAT to "No feedback to repeat",
+        StringKey.TRANSLATING_FEEDBACK to "Translating feedback...",
+        
         StringKey.COULD_NOT_SWITCH_LANGUAGE to "Could not switch language"
     )
     
@@ -90,6 +101,11 @@ object LocalizedStrings {
         
         StringKey.QUESTION_RECORDING_STARTED to "اپنا سوال پوچھیں۔ ریکارڈنگ رکنے کے لیے ٹیپ کریں۔",
         StringKey.GEMMA_RESPONDING to "جواب دے رہا ہوں...",
+        
+        StringKey.FEEDBACK_LISTENING_FOR_COMMAND to "کمانڈ سن رہا ہوں۔ 'تبدیل کریں'، 'دہرائیں'، یا 'سوال' کہیں۔",
+        StringKey.FEEDBACK_PREFIX to "فیڈبیک",
+        StringKey.NO_FEEDBACK_TO_REPEAT to "دہرانے کے لیے کوئی فیڈبیک نہیں",
+        StringKey.TRANSLATING_FEEDBACK to "فیڈبیک کا ترجمہ کر رہا ہوں...",
         
         StringKey.COULD_NOT_SWITCH_LANGUAGE to "زبان تبدیل نہیں کر سکے"
     )

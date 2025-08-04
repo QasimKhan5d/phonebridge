@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import kotlinx.coroutines.delay
 import com.example.braillebridge2.core.*
 import com.example.braillebridge2.chat.LlmModelManager
 import kotlinx.coroutines.Dispatchers
@@ -24,6 +25,7 @@ class MainViewModel : ViewModel() {
     val uiState = _uiState.asStateFlow()
     
     private var currentLessonPack: LessonPack? = null
+    private var currentFeedbackPack: FeedbackPack? = null
     private var voiceRecorderHelper: VoiceRecorderHelper? = null
     private var photoCaptureHelper: PhotoCaptureHelper? = null
     private var audioPlayerHelper: AudioPlayerHelper? = null
@@ -83,8 +85,10 @@ class MainViewModel : ViewModel() {
         if (currentState is AppState.Home) {
             when (currentState.notification) {
                 NotificationType.FEEDBACK, NotificationType.BOTH -> {
-                    // TODO: Implement feedback functionality
-                    Log.i(TAG, "Feedback functionality not yet implemented")
+                    currentFeedbackPack?.let { pack ->
+                        _uiState.value = AppState.Feedback(pack = pack)
+                        Log.i(TAG, "Opening feedback with ${pack.size} items")
+                    }
                 }
                 else -> {
                     Log.w(TAG, "No feedback available to open")
@@ -452,10 +456,18 @@ class MainViewModel : ViewModel() {
             val lessonPack = LessonPackParser.scanAndCopyLessonPacks(context)
             currentLessonPack = lessonPack
             
-            if (lessonPack != null && !lessonPack.isEmpty) {
-                NotificationType.HOMEWORK
-            } else {
-                NotificationType.NONE
+            // Scan for feedback packs from assets
+            val feedbackPack = FeedbackPackParser.scanAndCopyFeedbackPacks(context)
+            currentFeedbackPack = feedbackPack
+            
+            val hasHomework = lessonPack != null && !lessonPack.isEmpty
+            val hasFeedback = feedbackPack != null && !feedbackPack.isEmpty
+            
+            when {
+                hasHomework && hasFeedback -> NotificationType.BOTH
+                hasHomework -> NotificationType.HOMEWORK
+                hasFeedback -> NotificationType.FEEDBACK
+                else -> NotificationType.NONE
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error scanning for content: ${e.message}")
@@ -562,6 +574,283 @@ class MainViewModel : ViewModel() {
         if (currentState is AppState.Homework && currentState.mode == HomeworkMode.GEMMA_RESPONDING) {
             _uiState.value = currentState.copy(mode = HomeworkMode.VIEWING)
             Log.i(TAG, "Cancelled Gemma response")
+        }
+    }
+
+    // ============ FEEDBACK FUNCTIONALITY ============
+    
+    /**
+     * Handle gestures in feedback screen
+     */
+    fun onFeedbackGesture(gestureType: GestureType, ttsHelper: TtsHelper? = null) {
+        val currentState = _uiState.value
+        if (currentState !is AppState.Feedback) return
+
+        when (currentState.mode) {
+            FeedbackMode.VIEWING -> {
+                when (gestureType) {
+                    GestureType.TAP -> {
+                        // Repeat feedback
+                        val currentItem = currentState.currentItem
+                        if (currentItem != null) {
+                            // Extract just the clean feedback text (same logic as UI display)
+                            val fullFeedbackText = currentItem.getCurrentFeedback(currentState.language)
+                            val cleanFeedbackText = if (fullFeedbackText.contains("Feedback:")) {
+                                fullFeedbackText.substringAfter("Feedback:").substringBefore("Braille Text:").trim()
+                            } else {
+                                fullFeedbackText.substringBefore("Braille Text:").trim()
+                            }
+                            val prefix = LocalizedStrings.getString(LocalizedStrings.StringKey.FEEDBACK_PREFIX, currentState.language)
+                            ttsHelper?.speak("$prefix: $cleanFeedbackText")
+                        } else {
+                            val message = LocalizedStrings.getString(LocalizedStrings.StringKey.NO_FEEDBACK_TO_REPEAT, currentState.language)
+                            ttsHelper?.speak(message)
+                        }
+                    }
+                    GestureType.LONG_PRESS -> {
+                        // Start voice command
+                        _uiState.value = currentState.copy(mode = FeedbackMode.AWAITING_COMMAND)
+                        Log.i(TAG, "Started feedback voice command listening")
+                    }
+                    else -> { /* Ignore other gestures */ }
+                }
+            }
+            FeedbackMode.ASKING_QUESTION -> {
+                if (gestureType == GestureType.TAP) {
+                    // Speech recognition stopped by UI layer, just return to viewing mode
+                    _uiState.value = currentState.copy(mode = FeedbackMode.VIEWING)
+                }
+            }
+            else -> {
+                // For other modes, return to viewing
+                _uiState.value = currentState.copy(mode = FeedbackMode.VIEWING)
+            }
+        }
+    }
+
+    /**
+     * Handle voice commands in feedback screen
+     */
+    fun handleFeedbackVoiceCommand(command: String, ttsHelper: TtsHelper? = null, modelManager: LlmModelManager? = null) {
+        val currentState = _uiState.value
+        if (currentState !is AppState.Feedback) return
+
+        val recognizedCommand = command.lowercase().trim()
+        Log.i(TAG, "Recognized feedback command: '$recognizedCommand'")
+
+        when {
+            recognizedCommand.contains("repeat") || recognizedCommand.contains("دہرائیں") -> {
+                // Repeat current feedback
+                _uiState.value = currentState.copy(mode = FeedbackMode.VIEWING)
+                val currentItem = currentState.currentItem
+                if (currentItem != null) {
+                    // Extract just the clean feedback text (same logic as UI display)
+                    val fullFeedbackText = currentItem.getCurrentFeedback(currentState.language)
+                    val cleanFeedbackText = if (fullFeedbackText.contains("Feedback:")) {
+                        fullFeedbackText.substringAfter("Feedback:").substringBefore("Braille Text:").trim()
+                    } else {
+                        fullFeedbackText.substringBefore("Braille Text:").trim()
+                    }
+                    val prefix = LocalizedStrings.getString(LocalizedStrings.StringKey.FEEDBACK_PREFIX, currentState.language)
+                    ttsHelper?.speak("$prefix: $cleanFeedbackText")
+                } else {
+                    val message = LocalizedStrings.getString(LocalizedStrings.StringKey.NO_FEEDBACK_TO_REPEAT, currentState.language)
+                    ttsHelper?.speak(message)
+                }
+            }
+            
+            recognizedCommand.contains("switch") || recognizedCommand.contains("تبدیل") -> {
+                // Switch language
+                if (ttsHelper != null && modelManager != null) {
+                    switchFeedbackLanguage(ttsHelper, modelManager)
+                } else {
+                    val message = LocalizedStrings.getString(LocalizedStrings.StringKey.COULD_NOT_SWITCH_LANGUAGE, currentState.language)
+                    ttsHelper?.speak(message)
+                    _uiState.value = currentState.copy(mode = FeedbackMode.VIEWING)
+                }
+            }
+            
+            recognizedCommand.contains("ask") || recognizedCommand.contains("سوال") -> {
+                // Ask question about feedback
+                _uiState.value = currentState.copy(mode = FeedbackMode.ASKING_QUESTION)
+                Log.i(TAG, "Started feedback question recording")
+            }
+            
+            recognizedCommand.isEmpty() -> {
+                // Empty command, return to viewing
+                _uiState.value = currentState.copy(mode = FeedbackMode.VIEWING)
+            }
+            
+            else -> {
+                // Unrecognized command
+                val message = LocalizedStrings.getString(LocalizedStrings.StringKey.COMMAND_NOT_RECOGNIZED, currentState.language)
+                ttsHelper?.speak(message)
+                _uiState.value = currentState.copy(mode = FeedbackMode.VIEWING)
+            }
+        }
+    }
+
+    /**
+     * Switch language in feedback screen
+     */
+    private fun switchFeedbackLanguage(ttsHelper: TtsHelper, modelManager: LlmModelManager): Language? {
+        val currentState = _uiState.value
+        Log.i(TAG, "switchFeedbackLanguage called - Current state: $currentState")
+        if (currentState is AppState.Feedback) {
+            Log.i(TAG, "Current language before switch: ${currentState.language}")
+            val newLanguage = when (currentState.language) {
+                Language.ENGLISH -> Language.URDU
+                Language.URDU -> Language.ENGLISH
+            }
+            _uiState.value = currentState.copy(language = newLanguage, mode = FeedbackMode.VIEWING)
+            Log.i(TAG, "Switched feedback language to: $newLanguage")
+
+            // Update TTS language
+            ttsHelper.setLanguage(newLanguage)
+
+            // If switching to Urdu, translate feedback with proper UI state
+            if (newLanguage == Language.URDU) {
+                val currentItem = currentState.currentItem
+                if (currentItem != null) {
+                    // Set translating state and show message
+                    _uiState.value = currentState.copy(language = newLanguage, mode = FeedbackMode.TRANSLATING)
+                    val translatingMessage = LocalizedStrings.getString(LocalizedStrings.StringKey.TRANSLATING_FEEDBACK, newLanguage)
+                    ttsHelper.speak(translatingMessage)
+                    
+                    // Start translation asynchronously once model is ready
+                    viewModelScope.launch {
+                        while (!modelManager.isReady()) {
+                            delay(200)
+                        }
+                        translateFeedbackToUrdu(modelManager, currentItem, ttsHelper, speakSwitch = true)
+                    }
+                }
+            } else {
+                // English branch – speak confirmation once
+                val msg = LocalizedStrings.getString(LocalizedStrings.StringKey.SWITCHED_TO_ENGLISH, Language.ENGLISH)
+                ttsHelper.speak(msg)
+            }
+
+            return newLanguage
+        }
+        return null
+    }
+
+    /**
+     * Translate feedback to Urdu and cache it
+     */
+    private fun translateFeedbackToUrdu(modelManager: LlmModelManager, currentItem: FeedbackItem, ttsHelper: TtsHelper, speakSwitch: Boolean = true) {
+        if (currentItem.feedbackUrdu != null) {
+            Log.i(TAG, "Feedback already translated, skipping")
+            return
+        }
+
+        viewModelScope.launch {
+            // Extract just the clean feedback text (same logic as UI display and TTS)
+            val fullFeedbackText = currentItem.feedbackText
+            val cleanFeedbackText = if (fullFeedbackText.contains("Feedback:")) {
+                fullFeedbackText.substringAfter("Feedback:").substringBefore("Braille Text:").trim()
+            } else {
+                fullFeedbackText.substringBefore("Braille Text:").trim()
+            }
+            
+            gemmaHelper?.translateFeedbackToUrdu(
+                modelManager = modelManager,
+                feedbackText = cleanFeedbackText,
+                onResult = { translatedFeedback ->
+                    currentItem.feedbackUrdu = translatedFeedback
+                    Log.i(TAG, "Feedback translated to Urdu: $translatedFeedback")
+                    
+                    // Return to viewing mode
+                    val currentState = _uiState.value
+                    if (currentState is AppState.Feedback) {
+                        _uiState.value = currentState.copy(mode = FeedbackMode.VIEWING)
+                    }
+                    
+                    if (speakSwitch) {
+                        val switchMessage = LocalizedStrings.getString(LocalizedStrings.StringKey.SWITCHED_TO_URDU, Language.URDU)
+                        ttsHelper.speak("$switchMessage $translatedFeedback")
+                    }
+                },
+                onError = { error ->
+                    Log.e(TAG, "Feedback translation failed: $error")
+                    
+                    // Return to viewing mode even on error
+                    val currentState = _uiState.value
+                    if (currentState is AppState.Feedback) {
+                        _uiState.value = currentState.copy(mode = FeedbackMode.VIEWING)
+                    }
+                    
+                    // Fall back to speaking just the switch message
+                    val switchMessage = LocalizedStrings.getString(LocalizedStrings.StringKey.SWITCHED_TO_URDU, Language.URDU)
+                    ttsHelper.speak(switchMessage)
+                }
+            )
+        }
+    }
+
+    /**
+     * Handle feedback question recording result
+     */
+    fun onFeedbackQuestionRecordingResult(recognizedText: String, modelManager: LlmModelManager, ttsHelper: TtsHelper) {
+        val currentState = _uiState.value
+        if (currentState !is AppState.Feedback) return
+
+        Log.i(TAG, "Feedback question recognized: $recognizedText")
+        _uiState.value = currentState.copy(mode = FeedbackMode.GEMMA_RESPONDING)
+
+        val currentItem = currentState.currentItem
+        if (currentItem != null) {
+            // Get corresponding lesson item for context (if available)
+            val lessonItem = currentLessonPack?.items?.find { it.index == currentItem.index }
+            
+            gemmaHelper?.generateFeedbackUnderstandingWithStreamingTTS(
+                modelManager = modelManager,
+                userQuestion = recognizedText,
+                feedbackItem = currentItem,
+                lessonItem = lessonItem,
+                language = currentState.language,
+                ttsHelper = ttsHelper,
+                onComplete = {
+                    val updatedState = _uiState.value
+                    if (updatedState is AppState.Feedback && updatedState.mode == FeedbackMode.GEMMA_RESPONDING) {
+                        _uiState.value = updatedState.copy(mode = FeedbackMode.VIEWING)
+                        Log.i(TAG, "Feedback understanding response completed")
+                    }
+                },
+                onError = { error ->
+                    Log.e(TAG, "Feedback understanding response error: $error")
+                    val updatedState = _uiState.value
+                    if (updatedState is AppState.Feedback) {
+                        _uiState.value = updatedState.copy(mode = FeedbackMode.VIEWING)
+                    }
+                }
+            )
+        } else {
+            Log.w(TAG, "No current feedback item for question")
+            _uiState.value = currentState.copy(mode = FeedbackMode.VIEWING)
+        }
+    }
+
+    /**
+     * Handle feedback question recording error
+     */
+    fun onFeedbackQuestionRecordingError(state: AppState.Feedback, ttsHelper: TtsHelper) {
+        Log.e(TAG, "Feedback question recording error")
+        val errorMessage = LocalizedStrings.getString(LocalizedStrings.StringKey.COMMAND_NOT_HEARD, state.language)
+        ttsHelper.speak(errorMessage)
+        _uiState.value = state.copy(mode = FeedbackMode.VIEWING)
+    }
+
+    /**
+     * Cancel Gemma response in feedback screen
+     */
+    fun cancelFeedbackGemmaResponse() {
+        gemmaHelper?.cancelResponse()
+        val currentState = _uiState.value
+        if (currentState is AppState.Feedback && currentState.mode == FeedbackMode.GEMMA_RESPONDING) {
+            _uiState.value = currentState.copy(mode = FeedbackMode.VIEWING)
+            Log.i(TAG, "Cancelled feedback Gemma response")
         }
     }
 

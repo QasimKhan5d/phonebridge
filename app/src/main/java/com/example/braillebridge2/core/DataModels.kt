@@ -46,6 +46,34 @@ data class LessonPack(
 }
 
 /**
+ * Represents a single feedback item from teacher
+ */
+data class FeedbackItem(
+    val index: Int,                    // The X from submission_X_feedback
+    val feedbackText: String,          // Contents of feedback_submission_X.txt
+    val brailleSvg: File?,             // Optional braille SVG with corrections
+    var feedbackUrdu: String? = null,   // Cached Urdu translation
+    var conversationInitialized: Boolean = false  // whether base context added to Gemma session
+) {
+    fun getCurrentFeedback(language: Language): String = when (language) {
+        Language.ENGLISH -> feedbackText
+        Language.URDU -> feedbackUrdu ?: feedbackText // Fall back to English if no translation
+    }
+}
+
+/**
+ * Contains all feedback items 
+ */
+data class FeedbackPack(
+    val items: List<FeedbackItem>
+) {
+    val isEmpty: Boolean get() = items.isEmpty()
+    val size: Int get() = items.size
+    
+    fun getItem(index: Int): FeedbackItem? = items.getOrNull(index)
+}
+
+/**
  * Language options for the app
  */
 enum class Language {
@@ -69,6 +97,17 @@ enum class HomeworkMode {
     AWAITING_COMMAND,  // Listening for voice commands
     ASKING_QUESTION,   // Recording question for Gemma
     GEMMA_RESPONDING   // Gemma is generating response
+}
+
+/**
+ * Modes during feedback interaction
+ */
+enum class FeedbackMode {
+    VIEWING,           // Default viewing state
+    AWAITING_COMMAND,  // Listening for voice commands
+    ASKING_QUESTION,   // Recording question for Gemma
+    GEMMA_RESPONDING,  // Gemma is generating response
+    TRANSLATING        // Translating feedback to another language
 }
 
 /**
@@ -97,6 +136,17 @@ sealed interface AppState {
         val mode: HomeworkMode = HomeworkMode.VIEWING
     ) : AppState {
         val currentItem: LessonItem? get() = pack.getItem(currentIndex)
+        val isLastItem: Boolean get() = currentIndex >= pack.size - 1
+        val hasNextItem: Boolean get() = currentIndex < pack.size - 1
+    }
+    
+    data class Feedback(
+        val pack: FeedbackPack,
+        val currentIndex: Int = 0,
+        val language: Language = Language.ENGLISH,
+        val mode: FeedbackMode = FeedbackMode.VIEWING
+    ) : AppState {
+        val currentItem: FeedbackItem? get() = pack.getItem(currentIndex)
         val isLastItem: Boolean get() = currentIndex >= pack.size - 1
         val hasNextItem: Boolean get() = currentIndex < pack.size - 1
     }

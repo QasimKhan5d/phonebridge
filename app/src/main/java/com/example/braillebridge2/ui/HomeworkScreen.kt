@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
 import com.example.braillebridge2.core.*
+import com.example.braillebridge2.core.SpeechHelper
 import com.example.braillebridge2.chat.LlmModelManager
 import com.example.braillebridge2.viewmodel.MainViewModel
 import kotlinx.coroutines.delay
@@ -220,7 +221,7 @@ fun HomeworkScreen(
                             }
                             HomeworkMode.ASKING_QUESTION -> {
                                 // Stop question recording (speech recognition)
-                                speechRecognizer?.stopListening()
+                                SpeechHelper.stopSpeechRecognition(speechRecognizer)
                                 speechRecognizer = null
                                 viewModel.onHomeworkGesture(GestureType.TAP, ttsHelper)
                             }
@@ -242,7 +243,7 @@ fun HomeworkScreen(
                             }
                             HomeworkMode.ASKING_QUESTION -> {
                                 // Stop question recording (speech recognition)
-                                speechRecognizer?.stopListening()
+                                SpeechHelper.stopSpeechRecognition(speechRecognizer)
                                 speechRecognizer = null
                                 viewModel.onHomeworkGesture(GestureType.TAP, ttsHelper)
                             }
@@ -264,7 +265,7 @@ fun HomeworkScreen(
                             }
                             HomeworkMode.ASKING_QUESTION -> {
                                 // Stop question recording (speech recognition)
-                                speechRecognizer?.stopListening()
+                                SpeechHelper.stopSpeechRecognition(speechRecognizer)
                                 speechRecognizer = null
                                 viewModel.onHomeworkGesture(GestureType.TAP, ttsHelper)
                             }

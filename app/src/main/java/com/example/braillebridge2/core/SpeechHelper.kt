@@ -22,6 +22,17 @@ object SpeechHelper {
     /**
      * Starts speech recognition with callbacks
      */
+    fun stopSpeechRecognition(recognizer: SpeechRecognizer?) {
+        recognizer?.let {
+            try {
+                it.stopListening()
+                it.cancel()
+            } finally {
+                it.destroy()
+            }
+        }
+    }
+
     fun startSpeechRecognition(
         context: Context,
         language: Language = Language.ENGLISH,

@@ -44,7 +44,28 @@ You need to implement this finite state automata with robust state management.
 
 ## Feedback
 
-TBD once homework is implemented. Rough explanation below:
+A feedback is a zip file containing 1 or 2 files:
+
+1. Feedback text file (compulsory) written as "feedback_submission_X.txt" where X is some number
+2. Braille svg file (optional) containing the student's rendered braille submission with a red underline where their answer is wrong.
+
+Example is shown in "/Users/qasim.khan/Documents/gemma3nImpactChallenge/braille-bridge/submission_1_feedback/"
+
+If feedback is available, double tap on the homepage to open the feedback page. The feedback page opens the first feedback item and the UI shows:
+
+1. The feedback text
+2. The braille rendering (if available)
+
+The app speaks the feedback to the user in the current language using TTS. Hold and release and then speak "switch" to switch the language to Urdu.
+The app then translates the feedback text to Urdu and speaks it. This works exactly as the homework page but with less features.
+Holding and releasing has 3 options:
+
+1. Repeat to repeat the feedback (in the current language)
+2. Switch to switch the language
+3. Ask for feedback understanding
+
+Goals of feedback understanding are underlined below:
+
 
 ✅ 1. Feedback Understanding Assistant (Core Feature)
 Gemma helps the student understand what the teacher meant, and how to improve.
@@ -83,6 +104,8 @@ Outputs simplified, spoken explanation
 
 🔁 Optionally:
 Let student ask follow-ups: “Can you give me an example?” or “How do I write that better?”
+
+To do the above, you again need to provide context to the model. To do this, you look up the "diagram.json" in the corresponding homework folder. The corresponding folder is identified by the "X" in the folder name. The homework follows "item_X" and the feedback follows "submission_X_feedback". Write a good prompt to achieve the above stated goals.
 
 ## Verbal Spatial Grounding Assistant (VSGA) (final feature to be done at the end)
 

@@ -30,6 +30,7 @@ import com.example.braillebridge2.ui.theme.BrailleBridge2Theme
 import com.example.braillebridge2.core.*
 import com.example.braillebridge2.ui.HomeScreen
 import com.example.braillebridge2.ui.HomeworkScreen
+import com.example.braillebridge2.ui.FeedbackScreen
 import com.example.braillebridge2.viewmodel.MainViewModel
 import com.google.mediapipe.tasks.genai.llminference.GraphOptions
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
@@ -343,6 +344,16 @@ fun BrailleBridgeApp(
         
         is AppState.Homework -> {
             HomeworkScreen(
+                state = currentState,
+                viewModel = mainViewModel,
+                ttsHelper = ttsHelper,
+                modelManager = modelManager,
+                modifier = modifier
+            )
+        }
+        
+        is AppState.Feedback -> {
+            FeedbackScreen(
                 state = currentState,
                 viewModel = mainViewModel,
                 ttsHelper = ttsHelper,
