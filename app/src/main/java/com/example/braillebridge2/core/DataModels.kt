@@ -14,7 +14,8 @@ data class LessonItem(
     val scriptUr: String,
     val brailleEnSvg: File,     // braille_en.svg
     val brailleUrSvg: File,     // braille_ur.svg
-    val diagramJson: File       // diagram.json
+    val diagramJson: File,      // diagram.json
+    var questionUrdu: String? = null // Cached Urdu translation
 ) {
     fun getCurrentBrailleSvg(language: Language): File = when (language) {
         Language.ENGLISH -> brailleEnSvg
@@ -24,6 +25,11 @@ data class LessonItem(
     fun getCurrentScript(language: Language): String = when (language) {
         Language.ENGLISH -> scriptEn
         Language.URDU -> scriptUr
+    }
+    
+    fun getCurrentQuestion(language: Language): String = when (language) {
+        Language.ENGLISH -> question
+        Language.URDU -> questionUrdu ?: question // Fall back to English if no translation
     }
 }
 
@@ -60,7 +66,9 @@ enum class HomeworkMode {
     VIEWING,           // Default viewing state
     RECORDING_VOICE,   // Recording voice answer
     RECORDING_PHOTO,   // Taking photo answer
-    AWAITING_COMMAND   // Listening for voice command
+    AWAITING_COMMAND,  // Listening for voice commands
+    ASKING_QUESTION,   // Recording question for Gemma
+    GEMMA_RESPONDING   // Gemma is generating response
 }
 
 /**

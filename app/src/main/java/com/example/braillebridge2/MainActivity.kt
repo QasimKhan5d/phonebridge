@@ -66,6 +66,7 @@ class MainActivity : ComponentActivity() {
             BrailleBridge2Theme {
                 BrailleBridgeApp(
                     ttsHelper = ttsHelper,
+                    modelManager = modelManager,
                     modifier = Modifier.fillMaxSize()
                 )
             }
@@ -300,6 +301,7 @@ fun ChatMainScreen(
 @Composable
 fun BrailleBridgeApp(
     ttsHelper: TtsHelper,
+    modelManager: LlmModelManager,
     modifier: Modifier = Modifier
 ) {
     val mainViewModel: MainViewModel = viewModel()
@@ -344,6 +346,7 @@ fun BrailleBridgeApp(
                 state = currentState,
                 viewModel = mainViewModel,
                 ttsHelper = ttsHelper,
+                modelManager = modelManager,
                 modifier = modifier
             )
         }

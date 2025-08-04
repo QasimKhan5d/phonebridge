@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.braillebridge2.core.*
+import com.example.braillebridge2.chat.LlmModelManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -26,6 +27,7 @@ class MainViewModel : ViewModel() {
     private var voiceRecorderHelper: VoiceRecorderHelper? = null
     private var photoCaptureHelper: PhotoCaptureHelper? = null
     private var audioPlayerHelper: AudioPlayerHelper? = null
+    private var gemmaHelper: GemmaHelper? = null
     
     /**
      * Initialize the app by scanning for lesson packs and feedback
@@ -40,6 +42,7 @@ class MainViewModel : ViewModel() {
                 voiceRecorderHelper = VoiceRecorderHelper(context)
                 photoCaptureHelper = PhotoCaptureHelper(context)
                 audioPlayerHelper = AudioPlayerHelper(context)
+                        gemmaHelper = GemmaHelper()
                 
                 // Scan for lesson packs and feedback
                 val notification = scanForContent(context)
@@ -143,6 +146,16 @@ class MainViewModel : ViewModel() {
                 if (gestureType == GestureType.TAP) {
                     stopVoiceAnswer(currentState, ttsHelper)
                 }
+            }
+            HomeworkMode.ASKING_QUESTION -> {
+                if (gestureType == GestureType.TAP) {
+                    // Speech recognition stopped by UI layer, just return to viewing mode
+                    _uiState.value = currentState.copy(mode = HomeworkMode.VIEWING)
+                }
+            }
+            HomeworkMode.GEMMA_RESPONDING -> {
+                // Allow cancellation of Gemma response
+                cancelGemmaResponse()
             }
             else -> {
                 // Other modes handled elsewhere
@@ -265,7 +278,7 @@ class MainViewModel : ViewModel() {
     /**
      * Switch language and update TTS
      */
-    fun switchLanguage(ttsHelper: TtsHelper? = null): Language? {
+    fun switchLanguage(ttsHelper: TtsHelper? = null, modelManager: LlmModelManager? = null): Language? {
         val currentState = _uiState.value
         Log.i(TAG, "switchLanguage called - Current state: $currentState")
         if (currentState is AppState.Homework) {
@@ -280,6 +293,23 @@ class MainViewModel : ViewModel() {
             
             // Update TTS language
             ttsHelper?.setLanguage(newLanguage)
+            
+            // If switching to Urdu, translate question synchronously so it's ready for "repeat"
+            if (newLanguage == Language.URDU && modelManager != null && ttsHelper != null) {
+                val currentItem = currentState.currentItem
+                if (currentItem != null) {
+                    kotlinx.coroutines.runBlocking {
+                        translateQuestionToUrdu(modelManager, currentItem, ttsHelper, speakSwitch = false)
+                    }
+                    // speak confirmation + Urdu script once
+                    ttsHelper.speak(currentItem.scriptUr)
+                }
+            } else {
+                // English branch – speak confirmation once
+                val msg = LocalizedStrings.getString(LocalizedStrings.StringKey.SWITCHED_TO_ENGLISH, Language.ENGLISH)
+                ttsHelper?.speak(msg)
+            }
+            
             return newLanguage
         }
         return null
@@ -288,7 +318,7 @@ class MainViewModel : ViewModel() {
     /**
      * Handle voice command result
      */
-    fun handleVoiceCommand(command: String, ttsHelper: TtsHelper) {
+    fun handleVoiceCommand(command: String, ttsHelper: TtsHelper, modelManager: LlmModelManager? = null) {
         when (command.lowercase().trim()) {
             "listen" -> {
                 // Get the current state fresh for this command
@@ -341,7 +371,7 @@ class MainViewModel : ViewModel() {
                 if (currentState !is AppState.Homework) return
                 val currentItem = currentState.currentItem
                 
-                val newLanguage = switchLanguage(ttsHelper)
+                val newLanguage = switchLanguage(ttsHelper, modelManager)
                 
                 if (currentItem != null && newLanguage != null) {
                     val newLangName = when (newLanguage) {
@@ -378,13 +408,22 @@ class MainViewModel : ViewModel() {
                 if (currentItem != null) {
                     Log.i(TAG, "Repeating question")
                     val questionPrefix = LocalizedStrings.getString(LocalizedStrings.StringKey.QUESTION_PREFIX, currentState.language)
-                    ttsHelper.speak("$questionPrefix ${currentItem.index}. ${currentItem.question}")
+                    val currentQuestion = currentItem.getCurrentQuestion(currentState.language)
+                    ttsHelper.speak("$questionPrefix ${currentItem.index}. $currentQuestion")
                 } else {
                     val message = LocalizedStrings.getString(LocalizedStrings.StringKey.NO_QUESTION_TO_REPEAT, currentState.language)
                     ttsHelper.speak(message)
                 }
                 // Return to viewing mode for repeat command
                 _uiState.value = currentState.copy(mode = HomeworkMode.VIEWING)
+            }
+            "ask", "sawal" -> {
+                // Start asking question mode
+                val currentState = _uiState.value
+                if (currentState is AppState.Homework) {
+                    _uiState.value = currentState.copy(mode = HomeworkMode.ASKING_QUESTION)
+                    Log.i(TAG, "Started asking question mode")
+                }
             }
             else -> {
                 Log.w(TAG, "Unknown voice command: $command")
@@ -425,6 +464,108 @@ class MainViewModel : ViewModel() {
     }
     
     /**
+     * Translate question to Urdu and cache it
+     */
+    fun translateQuestionToUrdu(modelManager: LlmModelManager, currentItem: LessonItem, ttsHelper: TtsHelper, speakSwitch: Boolean = true) {
+        if (currentItem.questionUrdu != null) {
+            Log.i(TAG, "Question already translated, skipping")
+            return
+        }
+        
+        viewModelScope.launch {
+            gemmaHelper?.translateQuestionToUrdu(
+                modelManager = modelManager,
+                question = currentItem.question,
+                onResult = { translatedQuestion ->
+                    currentItem.questionUrdu = translatedQuestion
+                    Log.i(TAG, "Question translated to Urdu: $translatedQuestion")
+                    if (speakSwitch) {
+                        val scriptText = currentItem.getCurrentScript(Language.URDU)
+                        val switchMessage = LocalizedStrings.getString(LocalizedStrings.StringKey.SWITCHED_TO_URDU, Language.URDU)
+                        ttsHelper.speak("$switchMessage $scriptText")
+                    }
+                },
+                onError = { error ->
+                    Log.e(TAG, "Translation failed: $error")
+                    // Fall back to speaking just the switch message
+                    val switchMessage = LocalizedStrings.getString(LocalizedStrings.StringKey.SWITCHED_TO_URDU, Language.URDU)
+                    ttsHelper.speak(switchMessage)
+                }
+            )
+        }
+    }
+    
+    /**
+     * Handle question recording and processing
+     */
+    fun handleQuestionRecording(questionText: String, modelManager: LlmModelManager, ttsHelper: TtsHelper) {
+        val currentState = _uiState.value
+        if (currentState !is AppState.Homework) return
+        
+        val currentItem = currentState.currentItem ?: return
+        
+        Log.i(TAG, "Processing user question: $questionText")
+        
+        // Switch to responding mode
+        _uiState.value = currentState.copy(mode = HomeworkMode.GEMMA_RESPONDING)
+        
+        // Generate response with streaming TTS
+        gemmaHelper?.generateResponseWithStreamingTTS(
+            modelManager = modelManager,
+            userQuestion = questionText,
+            lessonItem = currentItem,
+            language = currentState.language,
+            ttsHelper = ttsHelper,
+            onComplete = {
+                // Return to viewing mode
+                val finalState = _uiState.value
+                if (finalState is AppState.Homework) {
+                    _uiState.value = finalState.copy(mode = HomeworkMode.VIEWING)
+                }
+                Log.i(TAG, "Gemma response completed")
+            },
+            onError = { error ->
+                Log.e(TAG, "Gemma response error: $error")
+                // Return to viewing mode on error
+                val finalState = _uiState.value
+                if (finalState is AppState.Homework) {
+                    _uiState.value = finalState.copy(mode = HomeworkMode.VIEWING)
+                }
+            }
+        )
+    }
+    
+        /**
+     * Handle question recording result (called by UI layer after STT completes)
+     */
+    fun onQuestionRecordingResult(recognizedText: String, modelManager: LlmModelManager, ttsHelper: TtsHelper) {
+        Log.i(TAG, "Question STT result: $recognizedText")
+        handleQuestionRecording(recognizedText, modelManager, ttsHelper)
+    }
+
+    /**
+     * Handle question recording error (called by UI layer if STT fails)
+     */
+    fun onQuestionRecordingError(currentState: AppState.Homework, ttsHelper: TtsHelper) {
+        Log.e(TAG, "Question STT error")
+        val message = LocalizedStrings.getString(LocalizedStrings.StringKey.COMMAND_NOT_HEARD, currentState.language)
+        ttsHelper.speak(message)
+        _uiState.value = currentState.copy(mode = HomeworkMode.VIEWING)
+    }
+    
+    /**
+     * Cancel Gemma response
+     */
+    fun cancelGemmaResponse() {
+        gemmaHelper?.cancelResponse()
+        val currentState = _uiState.value
+        if (currentState is AppState.Homework && currentState.mode == HomeworkMode.GEMMA_RESPONDING) {
+            _uiState.value = currentState.copy(mode = HomeworkMode.VIEWING)
+            Log.i(TAG, "Cancelled Gemma response")
+        }
+    }
+
+    /**
      * Cleanup resources when ViewModel is destroyed
      */
     override fun onCleared() {
@@ -432,6 +573,7 @@ class MainViewModel : ViewModel() {
         voiceRecorderHelper?.release()
         audioPlayerHelper?.release()
         photoCaptureHelper = null
+        gemmaHelper?.cancelResponse()
     }
 
 }

@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import coil.compose.AsyncImage
 import com.example.braillebridge2.core.*
+import com.example.braillebridge2.chat.LlmModelManager
 import com.example.braillebridge2.viewmodel.MainViewModel
 import kotlinx.coroutines.delay
 
@@ -36,6 +37,7 @@ fun HomeworkScreen(
     state: AppState.Homework,
     viewModel: MainViewModel,
     ttsHelper: TtsHelper,
+    modelManager: LlmModelManager,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -137,24 +139,48 @@ fun HomeworkScreen(
             }
             HomeworkMode.AWAITING_COMMAND -> {
                 val message = LocalizedStrings.getString(LocalizedStrings.StringKey.LISTENING_FOR_COMMAND, state.language)
-                ttsHelper.speak(message)
-                // Start speech recognition for commands
-                SpeechHelper.startSpeechRecognition(
-                    context = context,
-                    onResult = { recognizedText ->
-                        viewModel.handleVoiceCommand(recognizedText, ttsHelper)
-                        speechRecognizer = null
-                    },
-                    onError = {
-                        val message = LocalizedStrings.getString(LocalizedStrings.StringKey.COMMAND_NOT_HEARD, state.language)
-                        ttsHelper.speak(message)
-                        viewModel.handleVoiceCommand("", ttsHelper) // Return to viewing mode
-                        speechRecognizer = null
-                    },
-                    onStart = { recognizer ->
-                        speechRecognizer = recognizer
-                    }
-                )
+                ttsHelper.speak(message) {
+                    // Start speech recognition after TTS completes
+                    SpeechHelper.startSpeechRecognition(
+                        context = context,
+                        language = state.language,
+                        onResult = { recognizedText ->
+                            viewModel.handleVoiceCommand(recognizedText, ttsHelper, modelManager)
+                            speechRecognizer = null
+                        },
+                        onError = {
+                            val errorMessage = LocalizedStrings.getString(LocalizedStrings.StringKey.COMMAND_NOT_HEARD, state.language)
+                            ttsHelper.speak(errorMessage)
+                            viewModel.handleVoiceCommand("", ttsHelper, modelManager) // Return to viewing mode
+                            speechRecognizer = null
+                        },
+                        onStart = { recognizer ->
+                            speechRecognizer = recognizer
+                        }
+                    )
+                }
+            }
+            HomeworkMode.ASKING_QUESTION -> {
+                val message = LocalizedStrings.getString(LocalizedStrings.StringKey.QUESTION_RECORDING_STARTED, state.language)
+                ttsHelper.speak(message) {
+                    // Start speech recognition after TTS completes
+                    SpeechHelper.startSpeechRecognition(
+                        context = context,
+                        language = state.language,
+                        onResult = { recognizedText ->
+                            viewModel.onQuestionRecordingResult(recognizedText, modelManager, ttsHelper)
+                        },
+                        onError = {
+                            viewModel.onQuestionRecordingError(state, ttsHelper)
+                        },
+                        onStart = { recognizer ->
+                            speechRecognizer = recognizer
+                        }
+                    )
+                }
+            }
+            HomeworkMode.GEMMA_RESPONDING -> {
+                // Show responding UI - this will be handled by the UI layout
             }
             HomeworkMode.RECORDING_PHOTO -> {
                 // Check camera permission first
@@ -192,6 +218,16 @@ fun HomeworkScreen(
                                 // Stop voice recording
                                 viewModel.onHomeworkGesture(GestureType.TAP, ttsHelper)
                             }
+                            HomeworkMode.ASKING_QUESTION -> {
+                                // Stop question recording (speech recognition)
+                                speechRecognizer?.stopListening()
+                                speechRecognizer = null
+                                viewModel.onHomeworkGesture(GestureType.TAP, ttsHelper)
+                            }
+                            HomeworkMode.GEMMA_RESPONDING -> {
+                                // Cancel Gemma response
+                                viewModel.onHomeworkGesture(GestureType.TAP, ttsHelper)
+                            }
                             else -> { /* No action for other modes */ }
                         }
                     },
@@ -204,6 +240,16 @@ fun HomeworkScreen(
                                 // Stop voice recording
                                 viewModel.onHomeworkGesture(GestureType.TAP, ttsHelper)
                             }
+                            HomeworkMode.ASKING_QUESTION -> {
+                                // Stop question recording (speech recognition)
+                                speechRecognizer?.stopListening()
+                                speechRecognizer = null
+                                viewModel.onHomeworkGesture(GestureType.TAP, ttsHelper)
+                            }
+                            HomeworkMode.GEMMA_RESPONDING -> {
+                                // Cancel Gemma response
+                                viewModel.onHomeworkGesture(GestureType.TAP, ttsHelper)
+                            }
                             else -> { /* No action for other modes */ }
                         }
                     },
@@ -214,6 +260,16 @@ fun HomeworkScreen(
                             }
                             HomeworkMode.RECORDING_VOICE -> {
                                 // Stop voice recording
+                                viewModel.onHomeworkGesture(GestureType.TAP, ttsHelper)
+                            }
+                            HomeworkMode.ASKING_QUESTION -> {
+                                // Stop question recording (speech recognition)
+                                speechRecognizer?.stopListening()
+                                speechRecognizer = null
+                                viewModel.onHomeworkGesture(GestureType.TAP, ttsHelper)
+                            }
+                            HomeworkMode.GEMMA_RESPONDING -> {
+                                // Cancel Gemma response
                                 viewModel.onHomeworkGesture(GestureType.TAP, ttsHelper)
                             }
                             else -> { /* No action for other modes */ }
@@ -340,12 +396,16 @@ fun HomeworkScreen(
                     HomeworkMode.RECORDING_VOICE -> MaterialTheme.colorScheme.errorContainer
                     HomeworkMode.AWAITING_COMMAND -> MaterialTheme.colorScheme.primaryContainer
                     HomeworkMode.RECORDING_PHOTO -> MaterialTheme.colorScheme.secondaryContainer
+                    HomeworkMode.ASKING_QUESTION -> MaterialTheme.colorScheme.tertiaryContainer
+                    HomeworkMode.GEMMA_RESPONDING -> MaterialTheme.colorScheme.inversePrimary
                     else -> MaterialTheme.colorScheme.surface
                 },
                 contentColor = when (state.mode) {
                     HomeworkMode.RECORDING_VOICE -> MaterialTheme.colorScheme.onErrorContainer
                     HomeworkMode.AWAITING_COMMAND -> MaterialTheme.colorScheme.onPrimaryContainer
                     HomeworkMode.RECORDING_PHOTO -> MaterialTheme.colorScheme.onSecondaryContainer
+                    HomeworkMode.ASKING_QUESTION -> MaterialTheme.colorScheme.onTertiaryContainer
+                    HomeworkMode.GEMMA_RESPONDING -> MaterialTheme.colorScheme.onSurface
                     else -> MaterialTheme.colorScheme.onSurface
                 }
             ),
@@ -375,7 +435,7 @@ fun HomeworkScreen(
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "Say: 'listen', 'switch', or 'repeat'",
+                            text = "Say: 'listen', 'switch', 'repeat', or 'ask'",
                             style = MaterialTheme.typography.bodyMedium
                         )
                     }
@@ -387,6 +447,37 @@ fun HomeworkScreen(
                         )
                         Text(
                             text = "Take a photo of your answer",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                    HomeworkMode.ASKING_QUESTION -> {
+                        Text(
+                            text = "❓ Recording Question...",
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Ask your question about the image. Tap to stop.",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
+                    }
+                    HomeworkMode.GEMMA_RESPONDING -> {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp
+                            )
+                            Text(
+                                text = LocalizedStrings.getString(LocalizedStrings.StringKey.GEMMA_RESPONDING, state.language),
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                        Text(
+                            text = "Tap anywhere to cancel response",
                             style = MaterialTheme.typography.bodyMedium
                         )
                     }

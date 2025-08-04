@@ -2,7 +2,9 @@ package com.example.braillebridge2.core
 
 import android.content.Context
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import android.util.Log
+import android.os.Bundle
 import java.util.Locale
 
 private const val TAG = "TtsHelper"
@@ -42,10 +44,32 @@ class TtsHelper(
     /**
      * Speaks the provided text
      */
-    fun speak(text: String) {
+    fun speak(text: String, onComplete: (() -> Unit)? = null) {
         if (isTtsInitialized) {
-            textToSpeech?.speak(text, TextToSpeech.QUEUE_FLUSH, null, null)
+            val utteranceId = "utterance_${System.currentTimeMillis()}"
+            
+            if (onComplete != null) {
+                textToSpeech?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
+                    override fun onStart(utteranceId: String?) {}
+                    override fun onDone(completedUtteranceId: String?) {
+                        if (completedUtteranceId == utteranceId) {
+                            onComplete()
+                        }
+                    }
+                    override fun onError(utteranceId: String?) {
+                        if (utteranceId == utteranceId) {
+                            onComplete() // Call completion even on error
+                        }
+                    }
+                })
+            }
+            
+            val params = Bundle()
+            textToSpeech?.speak(text, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
             Log.i(TAG, "Speaking: ${text.take(50)}...")
+        } else if (onComplete != null) {
+            // If TTS not initialized, still call completion
+            onComplete()
         }
     }
     

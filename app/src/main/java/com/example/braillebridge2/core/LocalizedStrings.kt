@@ -36,13 +36,17 @@ object LocalizedStrings {
         RECORDING_STARTED_TAP_TO_STOP,
         CAMERA_OPENED_FOR_PHOTO,
         
+        // Ask feature
+        QUESTION_RECORDING_STARTED,
+        GEMMA_RESPONDING,
+        
         // General
         COULD_NOT_SWITCH_LANGUAGE
     }
     
     private val englishStrings = mapOf(
-        StringKey.LISTENING_FOR_COMMAND to "Listening for command. Say 'listen', 'switch', or 'repeat'.",
-        StringKey.COMMAND_NOT_RECOGNIZED to "Command not recognized. Say listen, switch, or repeat.",
+        StringKey.LISTENING_FOR_COMMAND to "Listening for command. Say 'listen', 'switch', 'repeat', or 'ask'.",
+        StringKey.COMMAND_NOT_RECOGNIZED to "Command not recognized. Say listen, switch, repeat, or ask.",
         StringKey.COMMAND_NOT_HEARD to "Command not heard. Please try again.",
         
         StringKey.SWITCHED_TO_ENGLISH to "Switched to English.",
@@ -59,12 +63,15 @@ object LocalizedStrings {
         StringKey.RECORDING_STARTED_TAP_TO_STOP to "Recording started. Tap again to stop.",
         StringKey.CAMERA_OPENED_FOR_PHOTO to "Camera opened for photo answer.",
         
+        StringKey.QUESTION_RECORDING_STARTED to "Ask your question now. Tap to stop recording.",
+        StringKey.GEMMA_RESPONDING to "Responding...",
+        
         StringKey.COULD_NOT_SWITCH_LANGUAGE to "Could not switch language"
     )
     
     private val urduStrings = mapOf(
-        StringKey.LISTENING_FOR_COMMAND to "کمانڈ سن رہا ہوں۔ 'سنیں'، 'تبدیل کریں'، یا 'دہرائیں' کہیں۔",
-        StringKey.COMMAND_NOT_RECOGNIZED to "کمانڈ سمجھ نہیں آئی۔ سنیں، تبدیل کریں، یا دہرائیں کہیں۔",
+        StringKey.LISTENING_FOR_COMMAND to "کمانڈ سن رہا ہوں۔ 'سنیں'، 'تبدیل کریں'، 'دہرائیں'، یا 'سوال' کہیں۔",
+        StringKey.COMMAND_NOT_RECOGNIZED to "کمانڈ سمجھ نہیں آئی۔ سنیں، تبدیل کریں، دہرائیں، یا سوال کہیں۔",
         StringKey.COMMAND_NOT_HEARD to "کمانڈ سنائی نہیں دی۔ دوبارہ کوشش کریں۔",
         
         StringKey.SWITCHED_TO_ENGLISH to "انگریزی میں تبدیل کر دیا گیا۔",
@@ -80,6 +87,9 @@ object LocalizedStrings {
         
         StringKey.RECORDING_STARTED_TAP_TO_STOP to "ریکارڈنگ شروع ہو گئی۔ رکنے کے لیے دوبارہ ٹیپ کریں۔",
         StringKey.CAMERA_OPENED_FOR_PHOTO to "تصویر کے جواب کے لیے کیمرا کھل گیا۔",
+        
+        StringKey.QUESTION_RECORDING_STARTED to "اپنا سوال پوچھیں۔ ریکارڈنگ رکنے کے لیے ٹیپ کریں۔",
+        StringKey.GEMMA_RESPONDING to "جواب دے رہا ہوں...",
         
         StringKey.COULD_NOT_SWITCH_LANGUAGE to "زبان تبدیل نہیں کر سکے"
     )

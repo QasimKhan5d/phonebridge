@@ -8,6 +8,8 @@ import android.speech.SpeechRecognizer
 import android.util.Log
 import android.os.Bundle
 import java.util.Locale
+import android.os.Looper
+import android.os.Handler
 
 private const val TAG = "SpeechHelper"
 
@@ -22,19 +24,19 @@ object SpeechHelper {
      */
     fun startSpeechRecognition(
         context: Context,
+        language: Language = Language.ENGLISH,
         onResult: (String) -> Unit,
         onError: () -> Unit,
         onStart: (SpeechRecognizer) -> Unit
     ) {
-        if (!SpeechRecognizer.isRecognitionAvailable(context)) {
-            Log.e(TAG, "Speech recognition not available")
-            onError()
-            return
-        }
-        
-        val speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context)
-        
-        speechRecognizer.setRecognitionListener(object : RecognitionListener {
+        val startRecognition: () -> Unit = {
+            if (!SpeechRecognizer.isRecognitionAvailable(context)) {
+                Log.e(TAG, "Speech recognition not available")
+                onError()
+            } else {
+                val speechRecognizer = SpeechRecognizer.createSpeechRecognizer(context)
+
+            speechRecognizer.setRecognitionListener(object : RecognitionListener {
             override fun onReadyForSpeech(params: Bundle?) {
                 Log.d(TAG, "Ready for speech")
             }
@@ -80,13 +82,23 @@ object SpeechHelper {
             }
         })
         
+        // Set locale based on the current language
+        val locale = when (language) {
+            Language.ENGLISH -> Locale("en", "US")
+            Language.URDU -> Locale("ur", "PK")
+        }
+        
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE, locale.toString())
+            putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, locale.toString())
+            putExtra(RecognizerIntent.EXTRA_ONLY_RETURN_LANGUAGE_PREFERENCE, true)
             putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak now...")
             putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
         }
+        
+        Log.d(TAG, "Starting STT with locale: ${locale} for language: $language")
         
         try {
             speechRecognizer.startListening(intent)
@@ -94,6 +106,15 @@ object SpeechHelper {
         } catch (e: Exception) {
             Log.e(TAG, "Error starting speech recognition: ${e.message}")
             onError()
+        }
+        } // end else block
+    }
+
+        // Execute on main thread
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            startRecognition()
+        } else {
+            android.os.Handler(Looper.getMainLooper()).post { startRecognition() }
         }
     }
 }
