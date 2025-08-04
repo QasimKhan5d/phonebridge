@@ -53,7 +53,8 @@ data class FeedbackItem(
     val feedbackText: String,          // Contents of feedback_submission_X.txt
     val brailleSvg: File?,             // Optional braille SVG with corrections
     var feedbackUrdu: String? = null,   // Cached Urdu translation
-    var conversationInitialized: Boolean = false  // whether base context added to Gemma session
+    var conversationInitialized: Boolean = false,  // whether base context added to Gemma session
+    var spokenOnce: Boolean = false            // whether feedback spoken initially
 ) {
     fun getCurrentFeedback(language: Language): String = when (language) {
         Language.ENGLISH -> feedbackText
@@ -111,6 +112,37 @@ enum class FeedbackMode {
 }
 
 /**
+ * Modes during spatial image understanding interaction
+ */
+enum class SpatialMode {
+    AWAITING_PHOTO,    // Waiting for user to take a photo
+    PROCESSING_PHOTO,  // Camera is open/processing photo
+    GEMMA_RESPONDING,  // Gemma is generating spatial description
+    AWAITING_COMMAND   // Listening for voice commands (repeat/switch/new photo)
+}
+
+/**
+ * Spatial conversation message types for chat-like interface
+ */
+sealed class SpatialMessage {
+    data class ImageMessage(
+        val file: File,
+        val timestamp: Long = System.currentTimeMillis()
+    ) : SpatialMessage()
+    
+    data class ResponseMessage(
+        val text: String,
+        val timestamp: Long = System.currentTimeMillis(),
+        val isComplete: Boolean = true
+    ) : SpatialMessage()
+    
+    data class StatusMessage(
+        val status: String,
+        val timestamp: Long = System.currentTimeMillis()
+    ) : SpatialMessage()
+}
+
+/**
  * Types of gestures supported in homework screen
  */
 enum class GestureType {
@@ -149,5 +181,19 @@ sealed interface AppState {
         val currentItem: FeedbackItem? get() = pack.getItem(currentIndex)
         val isLastItem: Boolean get() = currentIndex >= pack.size - 1
         val hasNextItem: Boolean get() = currentIndex < pack.size - 1
+    }
+    
+    data class Spatial(
+        val images: MutableList<File> = mutableListOf(),
+        val language: Language = Language.ENGLISH,
+        val mode: SpatialMode = SpatialMode.AWAITING_PHOTO,
+        var conversationInitialized: Boolean = false,
+        val conversationHistory: MutableList<SpatialMessage> = mutableListOf(),
+        val currentStreamingText: String = "",
+        val isStreaming: Boolean = false
+    ) : AppState {
+        val hasImages: Boolean get() = images.isNotEmpty()
+        val lastImage: File? get() = images.lastOrNull()
+        val hasConversation: Boolean get() = conversationHistory.isNotEmpty()
     }
 }

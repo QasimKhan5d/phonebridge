@@ -1,9 +1,11 @@
 package com.example.braillebridge2.core
 
+import android.graphics.Bitmap
 import android.util.Log
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Dispatchers
 import com.example.braillebridge2.chat.LlmModelManager
+import com.google.mediapipe.framework.image.BitmapImageBuilder
 import kotlinx.coroutines.*
 import java.io.File
 import java.util.concurrent.atomic.AtomicBoolean
@@ -89,17 +91,17 @@ class GemmaHelper {
                 // Build prompt
                 val languageInstruction = if (language == Language.URDU) "Respond in Urdu." else ""
                 val prompt = """
-                    You are guiding a blind child to explore educational content using mental visualization and spatial reasoning.
+                    You are guiding a blind or visually impaired child to explore educational content using mental visualization and spatial reasoning.
+                    A teacher provided a main question for the student to answer alongside some diagram details. The student is asking you for a hint to help them answer the question.
 
                     $languageInstruction
 
                     Your response must:
                     - Be SHORT: 1-2 sentences (10-15 seconds spoken).
-                    - Use SIMPLE, easy vocabulary suitable for kids.
+                    - Use SIMPLE, easy vocabulary suitable for young children.
                     - Rely heavily on SPATIAL VOCABULARY (e.g., "above", "next to", "towards the center", "in the middle", "on the left", "on the right", "in the top", "in the bottom").
                     - Describe colors, shapes, and sizes.
                     - Say things like you can move your finger or place it here to locate the object.
-                    - Refuse to answer the main question directly.
 
                     Context:
                     - Main question: $currentQuestion
@@ -107,14 +109,13 @@ class GemmaHelper {
 
                     The child asks: $userQuestion
 
-                    Respond with a guiding hint that helps them *picture* the diagram in their mind and think critically.
+                    Respond by helping them *picture* the diagram in their mind.
                 """.trimIndent()
                 
                 Log.d(TAG, "Sending prompt to Gemma: $prompt")
                 llmSession.addQueryChunk(prompt)
                 
                 var accumulatedText = ""
-                var lastTTSIndex = 0
                 val ttsQueue = mutableListOf<String>()
                 var isTTSPlaying = false
                 
@@ -359,6 +360,206 @@ class GemmaHelper {
                 Log.e(TAG, "Feedback understanding error: ${e.message}")
                 withContext(Dispatchers.Main) {
                     onError("Feedback understanding failed: ${e.message}")
+                }
+            }
+        }
+    }
+
+    /**
+     * Generate spatial description response with streaming TTS for image understanding
+     */
+    fun generateSpatialDescriptionWithStreamingTTS(
+        modelManager: LlmModelManager,
+        images: List<File>, // List of image files from spatial mode
+        language: Language,
+        ttsHelper: TtsHelper,
+        conversationInitialized: Boolean,
+        onStreamingUpdate: (String) -> Unit, // Called with partial responses during streaming
+        onComplete: (String) -> Unit, // Called with complete response
+        onTTSComplete: () -> Unit, // Called when TTS playback finishes
+        onError: (String) -> Unit
+    ) {
+        if (!modelManager.isReady()) {
+            onError("Model not ready")
+            return
+        }
+        
+        isCancelled.set(false)
+        
+        currentJob = CoroutineScope(Dispatchers.Default).launch {
+            try {
+                val llmInstance = modelManager.instance!!
+                val llmSession = llmInstance.session
+                
+                // Initialize conversation with base prompt if first time
+                if (!conversationInitialized) {
+                    val languageInstruction = if (language == Language.URDU) "Respond in Urdu only." else ""
+                    val basePrompt = """
+                        You are Gemma, an AI guide that helps blind or visually-impaired children explore diagrams and pictures with their fingertips.
+
+                        === TASK ===
+                        For **each** image you receive:
+                        1. Detect every salient object, label, arrow, connector or region.
+                        2. Detect the child's finger (the pointing tip) and the single object it touches.
+                        3. Infer the *role or function* of that pointed-to object within the context of the diagram (e.g., “heart pumps blood”, “USB port lets data in/out”).
+                        4. Determine the 2-3 nearest objects the child could easily trace their finger to next.
+                        5. Work out clear spatial relationships using vocabulary a 7-year-old can grasp (above, below, beside, left/right of, in the center, at the edge, etc.).
+                        6. Note visible colors, basic shapes, and relative sizes where helpful.
+
+                        === RESPONSE RULES ===
+                        * **Length:** 1-2 short sentences (≈ 10-15 seconds spoken).
+                        * **Style:** Simple, friendly language suited to young children. Avoid complex terms or long clauses.
+                        * **Focus:** 
+                        * Name the object being touched **first**.
+                        * State its role/function in 1-2 words if obvious (e.g., “the heart - it pumps blood”).
+                        * Describe its location in the diagram using spatial words.
+                        * Mention the nearest object(s) the child can reach next, with one spatial cue each.
+                        * **Do not** reveal your reasoning process or mention “I see”, “analysis”, bounding boxes, or model internals.
+
+                        === OUTPUT TEMPLATE ===
+                        “<Pointed-object>, <tiny function/role>, is <spatial position>. Right next to it is <nearest-object-1>, and just <spatial relation> is <nearest-object-2>.”
+
+                        $languageInstruction
+
+                        Remember: keep it short, vivid, and spatially precise.
+                    """.trimIndent()
+                    
+                    llmSession.addQueryChunk(basePrompt)
+                    Log.d(TAG, "Added base spatial prompt to session")
+                }
+                
+                // Add all images to the session for context
+                val bitmaps = mutableListOf<Bitmap>()
+                for (imageFile in images) {
+                    try {
+                        val bitmap = android.graphics.BitmapFactory.decodeFile(imageFile.absolutePath)
+                        if (bitmap != null) {
+                            bitmaps.add(bitmap)
+                            llmSession.addImage(BitmapImageBuilder(bitmap).build())
+                            Log.d(TAG, "Added image to session: ${imageFile.name}")
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error loading image ${imageFile.name}: ${e.message}")
+                    }
+                }
+                
+                if (bitmaps.isEmpty()) {
+                    withContext(Dispatchers.Main) {
+                        onError("No valid images to process")
+                    }
+                    return@launch
+                }
+                
+                // Add query for the latest image
+                val queryPrompt = if (images.size == 1) {
+                    "Describe what the child is pointing to in this diagram and its spatial location."
+                } else {
+                    "Describe what the child is pointing to in this new image, considering the context from previous images."
+                }
+                
+                llmSession.addQueryChunk(queryPrompt)
+                Log.d(TAG, "Added spatial query to session with ${images.size} images")
+                
+                val ttsQueue = mutableListOf<String>()
+                var isTTSPlaying = false
+                
+                // TTS playback function
+                fun playNextTTS() {
+                    if (ttsQueue.isNotEmpty() && !isCancelled.get()) {
+                        isTTSPlaying = true
+                        val textToSpeak = ttsQueue.removeAt(0)
+                        Log.d(TAG, "Playing spatial TTS: '$textToSpeak'")
+                        
+                        CoroutineScope(Dispatchers.Main).launch {
+                            ttsHelper.speak(textToSpeak) {
+                                Log.d(TAG, "Spatial TTS completed for: '${textToSpeak.take(50)}...'")
+                                isTTSPlaying = false
+                                if (ttsQueue.isNotEmpty() && !isCancelled.get()) {
+                                    playNextTTS()
+                                }
+                            }
+                        }
+                    } else {
+                        isTTSPlaying = false
+                    }
+                }
+                
+                // Generate response with streaming
+                Log.d(TAG, "Starting spatial Gemma generation with streaming...")
+                val responseBuilder = StringBuilder()
+                
+                // Start streaming inference
+                llmSession.generateResponseAsync { partialResult, done ->
+                    if (isCancelled.get()) return@generateResponseAsync
+                    
+                    // append new token/chunk to builder
+                    responseBuilder.append(partialResult)
+                    val accumulatedResponse = responseBuilder.toString()
+                    
+                    // Send streaming update to UI
+                    CoroutineScope(Dispatchers.Main).launch {
+                        onStreamingUpdate(accumulatedResponse)
+                    }
+                    
+                    Log.d(TAG, "Spatial streaming update: '${partialResult.take(100)}...' (done: $done)")
+                    
+                    if (done) {
+                        val finalResponse = responseBuilder.toString()
+                        Log.d(TAG, "Spatial generation complete. Total length: ${finalResponse.length}")
+                        Log.d(TAG, "Final response: '${finalResponse.take(200)}...'")
+                        
+                        if (isCancelled.get()) return@generateResponseAsync
+                        
+                        // Process final response for TTS
+                        val periodChars = if (language == Language.URDU) "۔" else "."
+                        val sentences = finalResponse.split(periodChars)
+                        val maxSentences = 3 // Keep responses brief
+                        
+                        for (i in 0 until minOf(sentences.size, maxSentences)) {
+                            if (isCancelled.get()) break
+                            
+                            var sentence = sentences[i].trim()
+                            if (sentence.isNotEmpty()) {
+                                if (i < sentences.size - 1) {
+                                    sentence += periodChars
+                                }
+                                
+                                Log.d(TAG, "Adding spatial sentence to TTS queue: '${sentence.take(50)}...' (${i + 1}/${maxSentences})")
+                                ttsQueue.add(sentence)
+                            }
+                        }
+                        // Start playback if not already
+                        if (ttsQueue.isEmpty()) {
+                            // Fallback: speak entire response if split failed
+                            ttsQueue.add(finalResponse)
+                        }
+                        if (!isTTSPlaying) {
+                            playNextTTS()
+                        }
+                        
+                        // Call onComplete immediately with the final response
+                        CoroutineScope(Dispatchers.Main).launch {
+                            onComplete(finalResponse)
+                        }
+                        
+                        // Wait for TTS to complete, then call onTTSComplete
+                        CoroutineScope(Dispatchers.Main).launch {
+                            while (ttsQueue.isNotEmpty() || isTTSPlaying) {
+                                delay(100)
+                                if (isCancelled.get()) break
+                            }
+                            if (!isCancelled.get()) {
+                                Log.d(TAG, "Spatial TTS queue finished")
+                                onTTSComplete()
+                            }
+                        }
+                    }
+                }
+                
+            } catch (e: Exception) {
+                Log.e(TAG, "Spatial processing error: ${e.message}")
+                withContext(Dispatchers.Main) {
+                    onError("Spatial processing failed: ${e.message}")
                 }
             }
         }

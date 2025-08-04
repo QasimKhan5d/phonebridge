@@ -49,7 +49,7 @@ fun HomeworkScreen(
     val cameraLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        viewModel.handlePhotoCaptureResult(result.resultCode, ttsHelper)
+        viewModel.handlePhotoCaptureResult(result.resultCode, null, ttsHelper)
     }
     
     // Permission launcher for camera

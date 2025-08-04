@@ -31,6 +31,7 @@ import com.example.braillebridge2.core.*
 import com.example.braillebridge2.ui.HomeScreen
 import com.example.braillebridge2.ui.HomeworkScreen
 import com.example.braillebridge2.ui.FeedbackScreen
+import com.example.braillebridge2.ui.SpatialScreen
 import com.example.braillebridge2.viewmodel.MainViewModel
 import com.google.mediapipe.tasks.genai.llminference.GraphOptions
 import com.google.mediapipe.tasks.genai.llminference.LlmInference
@@ -358,6 +359,16 @@ fun BrailleBridgeApp(
                 viewModel = mainViewModel,
                 ttsHelper = ttsHelper,
                 modelManager = modelManager,
+                modifier = modifier
+            )
+        }
+        
+        is AppState.Spatial -> {
+            SpatialScreen(
+                state = currentState,
+                viewModel = mainViewModel,
+                modelManager = modelManager,
+                ttsHelper = ttsHelper,
                 modifier = modifier
             )
         }

@@ -30,13 +30,14 @@ fun HomeScreen(
     
     // Announce notifications when screen loads
     LaunchedEffect(state.notification) {
-        val message = when (state.notification) {
+        val notificationMessage = when (state.notification) {
             NotificationType.HOMEWORK -> "You have new homework, tap once to open it."
             NotificationType.FEEDBACK -> "You have new feedback, tap twice to open it."
             NotificationType.BOTH -> "You have new homework and feedback. Tap once for homework, twice for feedback."
             NotificationType.NONE -> "No new notifications."
         }
-        ttsHelper.speak(message)
+        val fullMessage = "$notificationMessage Hold to understand a diagram."
+        ttsHelper.speak(fullMessage)
     }
     
     Box(
@@ -50,6 +51,9 @@ fun HomeScreen(
                     },
                     onDoubleTap = {
                         viewModel.onHomeDoubleTap()
+                    },
+                    onLongPress = {
+                        viewModel.onHomeLongPress()
                     }
                 )
             },
@@ -176,6 +180,45 @@ fun HomeScreen(
                             text = "All caught up!",
                             style = MaterialTheme.typography.bodyLarge,
                             color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                }
+                
+                // Spatial Feature Information
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                Card(
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer
+                    ),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.CameraAlt,
+                            contentDescription = "Image Understanding",
+                            modifier = Modifier.size(32.dp),
+                            tint = MaterialTheme.colorScheme.secondary
+                        )
+                        Text(
+                            text = "Image Understanding",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
+                            textAlign = TextAlign.Center
+                        )
+                        Text(
+                            text = "Hold to understand a diagram",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSecondaryContainer,
                             textAlign = TextAlign.Center
                         )
                     }

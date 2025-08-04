@@ -109,7 +109,7 @@ To do the above, you again need to provide context to the model. To do this, you
 
 ## Verbal Spatial Grounding Assistant (VSGA) (final feature to be done at the end)
 
-“Child places finger on the tactile diagram. Teacher app photographs it. Gemma explains what they’re touching, where it is, and how it relates to the rest of the diagram — in spoken Urdu. All offline. All on-device.”
+“Child places finger on the diagram. Teacher app photographs it. Gemma explains what they’re touching, where it is, and how it relates to the rest of the diagram — in spoken Urdu. All offline. All on-device.”
 
 🧠 Problem It Solves
 Blind kids using tactile diagrams can feel parts, but:

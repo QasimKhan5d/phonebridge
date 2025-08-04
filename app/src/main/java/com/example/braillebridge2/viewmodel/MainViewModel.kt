@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.delay
+import android.content.Intent
 import com.example.braillebridge2.core.*
 import com.example.braillebridge2.chat.LlmModelManager
 import kotlinx.coroutines.Dispatchers
@@ -95,6 +96,14 @@ class MainViewModel : ViewModel() {
                 }
             }
         }
+    }
+
+    /**
+     * Handle home long press - open image understanding mode
+     */
+    fun onHomeLongPress() {
+        Log.i(TAG, "Home long press - opening spatial image understanding")
+        _uiState.value = AppState.Spatial()
     }
     
     /**
@@ -245,25 +254,47 @@ class MainViewModel : ViewModel() {
     /**
      * Handle photo capture result
      */
-    fun handlePhotoCaptureResult(resultCode: Int, ttsHelper: TtsHelper? = null) {
+    fun handlePhotoCaptureResult(resultCode: Int, modelManager: LlmModelManager? = null, ttsHelper: TtsHelper? = null) {
         val currentState = _uiState.value
-        if (currentState is AppState.Homework) {
-            photoCaptureHelper?.handleCameraResult(resultCode) { success, file, error ->
-                if (success && file != null) {
-                    Log.i(TAG, "Photo answer saved: ${file.absolutePath}")
-                    // TODO: Store the answer file path in the lesson state or database
-                    val currentState = _uiState.value
-                    if (currentState is AppState.Homework) {
-                        val message = LocalizedStrings.getString(LocalizedStrings.StringKey.PHOTO_SAVED, currentState.language)
-                        ttsHelper?.speak(message)
+        
+        when (currentState) {
+            is AppState.Homework -> {
+                photoCaptureHelper?.handleCameraResult(resultCode) { success, file, error ->
+                    if (success && file != null) {
+                        Log.i(TAG, "Photo answer saved: ${file.absolutePath}")
+                        // TODO: Store the answer file path in the lesson state or database
+                        val currentState = _uiState.value
+                        if (currentState is AppState.Homework) {
+                            val message = LocalizedStrings.getString(LocalizedStrings.StringKey.PHOTO_SAVED, currentState.language)
+                            ttsHelper?.speak(message)
+                        } else {
+                            ttsHelper?.speak("Photo saved")
+                        }
                     } else {
-                        ttsHelper?.speak("Photo saved")
+                        Log.e(TAG, "Failed to save photo: $error")
                     }
-                } else {
-                    Log.e(TAG, "Failed to save photo: $error")
+                    // Return to viewing mode regardless of success/failure
+                    _uiState.value = currentState.copy(mode = HomeworkMode.VIEWING)
                 }
-                // Return to viewing mode regardless of success/failure
-                _uiState.value = currentState.copy(mode = HomeworkMode.VIEWING)
+            }
+            
+            is AppState.Spatial -> {
+                photoCaptureHelper?.handleCameraResult(resultCode) { success, file, error ->
+                    if (success && file != null && modelManager != null && ttsHelper != null) {
+                        Log.i(TAG, "Spatial photo captured: ${file.absolutePath}")
+                        // Process spatial photo with Gemma
+                        onSpatialPhotoReady(file, modelManager, ttsHelper)
+                    } else {
+                        Log.e(TAG, "Failed to capture spatial photo: $error")
+                        // Return to awaiting photo state on failure
+                        _uiState.value = currentState.copy(mode = SpatialMode.AWAITING_PHOTO)
+                        ttsHelper?.speak("Photo capture failed. Please try again.")
+                    }
+                }
+            }
+            
+            else -> {
+                Log.w(TAG, "Photo capture result received in unexpected state: ${currentState::class.simpleName}")
             }
         }
     }
@@ -852,6 +883,264 @@ class MainViewModel : ViewModel() {
             _uiState.value = currentState.copy(mode = FeedbackMode.VIEWING)
             Log.i(TAG, "Cancelled feedback Gemma response")
         }
+    }
+
+    /**
+     * Spatial image understanding methods
+     */
+    fun getSpatialCameraIntent(): Intent? {
+        return photoCaptureHelper?.createCameraIntent(-1) // Use -1 for spatial photos
+    }
+
+    fun onSpatialTap(ttsHelper: TtsHelper) {
+        val currentState = _uiState.value
+        if (currentState is AppState.Spatial) {
+            when (currentState.mode) {
+                SpatialMode.AWAITING_PHOTO, SpatialMode.AWAITING_COMMAND -> {
+                    // Take another photo
+                    _uiState.value = currentState.copy(mode = SpatialMode.PROCESSING_PHOTO)
+                    val message = LocalizedStrings.getString(LocalizedStrings.StringKey.TAKE_PHOTO_INSTRUCTION, currentState.language)
+                    ttsHelper.speak(message) {
+                        val cameraIntent = getSpatialCameraIntent()
+                        // Camera intent will be handled by Activity
+                    }
+                }
+                else -> { /* No action for other modes */ }
+            }
+        }
+    }
+
+    fun onSpatialGesture(gestureType: GestureType, ttsHelper: TtsHelper) {
+        val currentState = _uiState.value
+        if (currentState is AppState.Spatial) {
+            when (gestureType) {
+                GestureType.LONG_PRESS -> {
+                    if (currentState.mode == SpatialMode.AWAITING_COMMAND || currentState.mode == SpatialMode.AWAITING_PHOTO) {
+                        // Start voice command listening (repeat/switch/new photo)
+                        // TODO: Implement voice commands for spatial mode
+                        Log.i(TAG, "Spatial voice commands not yet implemented")
+                    }
+                }
+                GestureType.TAP -> {
+                    if (currentState.mode == SpatialMode.GEMMA_RESPONDING) {
+                        // Cancel Gemma response
+                        gemmaHelper?.cancelResponse()
+                        _uiState.value = currentState.copy(mode = SpatialMode.AWAITING_COMMAND)
+                    }
+                }
+                else -> { /* No action for other gestures */ }
+            }
+        }
+    }
+
+    fun onSpatialPhotoReady(photoFile: File, modelManager: LlmModelManager, ttsHelper: TtsHelper) {
+        val currentState = _uiState.value
+        if (currentState is AppState.Spatial) {
+            Log.i(TAG, "Spatial photo captured: ${photoFile.absolutePath}")
+            
+            // Add photo to history and conversation
+            currentState.images.add(photoFile)
+            currentState.conversationHistory.add(
+                SpatialMessage.ImageMessage(photoFile)
+            )
+            
+            // Check model readiness and handle accordingly
+            if (!modelManager.isReady()) {
+                if (modelManager.isInitializing) {
+                    // Model is loading - show status and wait
+                    Log.i(TAG, "Model is loading, waiting for readiness...")
+                    currentState.conversationHistory.add(
+                        SpatialMessage.StatusMessage("Preparing Gemma3N...")
+                    )
+                    _uiState.value = currentState.copy(mode = SpatialMode.GEMMA_RESPONDING)
+                    
+                    // Wait for model to be ready
+                    waitForModelAndProcess(photoFile, modelManager, ttsHelper)
+                } else if (modelManager.initializationError != null) {
+                    // Model failed to load
+                    Log.e(TAG, "Model initialization failed: ${modelManager.initializationError}")
+                    currentState.conversationHistory.add(
+                        SpatialMessage.StatusMessage("Model loading failed. Please restart the app.")
+                    )
+                    _uiState.value = currentState.copy(mode = SpatialMode.AWAITING_COMMAND)
+                    ttsHelper.speak("Model loading failed. Please restart the app.")
+                } else {
+                    // Model not started - shouldn't happen but handle gracefully
+                    Log.w(TAG, "Model not initialized and not loading")
+                    currentState.conversationHistory.add(
+                        SpatialMessage.StatusMessage("Model not ready. Please try again.")
+                    )
+                    _uiState.value = currentState.copy(mode = SpatialMode.AWAITING_COMMAND)
+                    ttsHelper.speak("Model not ready. Please try again.")
+                }
+            } else {
+                // Model is ready - process immediately
+                processSpatialImage(photoFile, modelManager, ttsHelper)
+            }
+        }
+    }
+    
+    private fun waitForModelAndProcess(photoFile: File, modelManager: LlmModelManager, ttsHelper: TtsHelper) {
+        viewModelScope.launch {
+            try {
+                // Wait for model to be ready (with timeout)
+                var waitTime = 0
+                val maxWaitTime = 30000 // 30 seconds
+                
+                while (!modelManager.isReady() && waitTime < maxWaitTime) {
+                    delay(500)
+                    waitTime += 500
+                    
+                    // Update status periodically (but don't add to conversation history)
+                    if (waitTime % 5000 == 0) { // Every 5 seconds
+                        Log.d(TAG, "Still waiting for model... (${waitTime/1000}s)")
+                    }
+                }
+                
+                val currentState = _uiState.value
+                if (currentState is AppState.Spatial) {
+                    // Clear all "Preparing Gemma3N" status messages
+                    currentState.conversationHistory.removeIf { 
+                        it is SpatialMessage.StatusMessage && 
+                        it.status.startsWith("Preparing Gemma3N")
+                    }
+                    
+                    if (modelManager.isReady()) {
+                        Log.i(TAG, "Model ready after ${waitTime}ms, processing image")
+                        _uiState.value = currentState.copy() // Trigger UI update
+                        processSpatialImage(photoFile, modelManager, ttsHelper)
+                    } else {
+                        Log.e(TAG, "Model loading timeout after ${waitTime}ms")
+                        currentState.conversationHistory.add(
+                            SpatialMessage.StatusMessage("Model loading timeout. Please try again.")
+                        )
+                        _uiState.value = currentState.copy(mode = SpatialMode.AWAITING_COMMAND)
+                        ttsHelper.speak("Model loading took too long. Please try again.")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error waiting for model: ${e.message}")
+                val currentState = _uiState.value
+                if (currentState is AppState.Spatial) {
+                    // Clear preparing messages before adding error
+                    currentState.conversationHistory.removeIf { 
+                        it is SpatialMessage.StatusMessage && 
+                        it.status.startsWith("Preparing Gemma3N")
+                    }
+                    currentState.conversationHistory.add(
+                        SpatialMessage.StatusMessage("Error loading model. Please try again.")
+                    )
+                    _uiState.value = currentState.copy(mode = SpatialMode.AWAITING_COMMAND)
+                    ttsHelper.speak("Error loading model. Please try again.")
+                }
+            }
+        }
+    }
+    
+    private fun processSpatialImage(photoFile: File, modelManager: LlmModelManager, ttsHelper: TtsHelper) {
+        val currentState = _uiState.value
+        if (currentState is AppState.Spatial) {
+            // Add status message
+            val statusMessage = SpatialMessage.StatusMessage("Understanding image...")
+            currentState.conversationHistory.add(statusMessage)
+            _uiState.value = currentState.copy(mode = SpatialMode.GEMMA_RESPONDING, isStreaming = false)
+            
+            Log.i(TAG, "Starting Gemma spatial processing with ${currentState.images.size} images")
+            
+            var firstTokenReceived = false
+            
+            gemmaHelper?.generateSpatialDescriptionWithStreamingTTS(
+                modelManager = modelManager,
+                images = currentState.images.toList(),
+                language = currentState.language,
+                ttsHelper = ttsHelper,
+                conversationInitialized = currentState.conversationInitialized,
+                onStreamingUpdate = { partialText ->
+                    val newState = _uiState.value
+                    if (newState is AppState.Spatial) {
+                        var historyForUpdate = newState.conversationHistory
+                        // Remove status message on first token
+                        if (!firstTokenReceived && partialText.isNotEmpty()) {
+                            firstTokenReceived = true
+                            // Remove the "Understanding image..." status message
+                            val updatedHistory = newState.conversationHistory.toMutableList()
+                            updatedHistory.removeIf {
+                                it is SpatialMessage.StatusMessage && it.status == "Understanding image..."
+                            }
+                            historyForUpdate = updatedHistory
+                            Log.d(TAG, "First token received, removed status message")
+                        }
+                        
+                        _uiState.value = newState.copy(
+                            conversationHistory = historyForUpdate,
+                            currentStreamingText = partialText,
+                            isStreaming = true
+                        )
+                    }
+                },
+                onComplete = { finalText ->
+                    Log.i(TAG, "Spatial Gemma processing completed: '${finalText.take(100)}...'")
+                    val newState = _uiState.value
+                    if (newState is AppState.Spatial) {
+                        // Build updated history immutably
+                        val updatedHistory = newState.conversationHistory.toMutableList()
+                        if (finalText.isNotEmpty()) {
+                            updatedHistory.add(
+                                SpatialMessage.ResponseMessage(finalText)
+                            )
+                        }
+                        // Keep streaming visible until TTS is done, but mark as completed
+                        _uiState.value = newState.copy(
+                            conversationHistory = updatedHistory,
+                            mode = SpatialMode.AWAITING_COMMAND,
+                            conversationInitialized = true,
+                            currentStreamingText = finalText, // Keep text visible during TTS
+                            isStreaming = false // But mark as not streaming
+                        )
+                    }
+                },
+                onTTSComplete = {
+                    // Called when TTS finishes - now clear the streaming text
+                    Log.i(TAG, "Spatial TTS completed")
+                    val newState = _uiState.value
+                    if (newState is AppState.Spatial) {
+                        _uiState.value = newState.copy(
+                            currentStreamingText = ""
+                        )
+                    }
+                },
+                onError = { error ->
+                    Log.e(TAG, "Spatial Gemma processing failed: $error")
+                    val newState = _uiState.value
+                    if (newState is AppState.Spatial) {
+                        // Remove understanding status and add error
+                        newState.conversationHistory.removeIf { 
+                            it is SpatialMessage.StatusMessage && it.status == "Understanding image..." 
+                        }
+                        newState.conversationHistory.add(
+                            SpatialMessage.StatusMessage("Failed to understand image: $error")
+                        )
+                        _uiState.value = newState.copy(
+                            mode = SpatialMode.AWAITING_COMMAND,
+                            currentStreamingText = "",
+                            isStreaming = false
+                        )
+                        ttsHelper.speak("Sorry, I couldn't process the image. Please try again.")
+                    }
+                }
+            )
+        }
+    }
+
+    fun goHome() {
+        // Clear any spatial conversation state when leaving
+        val currentState = _uiState.value
+        if (currentState is AppState.Spatial) {
+            // TODO: Clean up Gemma session if needed
+        }
+        
+        // Use a simple notification for now - will be updated on next initialization
+        _uiState.value = AppState.Home(notification = NotificationType.NONE)
     }
 
     /**

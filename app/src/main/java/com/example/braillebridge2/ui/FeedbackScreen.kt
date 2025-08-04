@@ -121,9 +121,8 @@ fun FeedbackScreen(
     LaunchedEffect(state.mode) {
         when (state.mode) {
             FeedbackMode.VIEWING -> {
-                // Read the feedback when first entering or returning to viewing mode
-                if (currentItem != null) {
-                    // Extract just the clean feedback text (same logic as UI display)
+                // Speak feedback only once when page first opened
+                if (currentItem != null && !currentItem.spokenOnce) {
                     val fullFeedbackText = currentItem.getCurrentFeedback(state.language)
                     val cleanFeedbackText = if (fullFeedbackText.contains("Feedback:")) {
                         fullFeedbackText.substringAfter("Feedback:").substringBefore("Braille Text:").trim()
@@ -131,7 +130,10 @@ fun FeedbackScreen(
                         fullFeedbackText.substringBefore("Braille Text:").trim()
                     }
                     val prefix = LocalizedStrings.getString(LocalizedStrings.StringKey.FEEDBACK_PREFIX, state.language)
-                    ttsHelper.speak("$prefix: $cleanFeedbackText")
+                    ttsHelper.speak("$prefix: $cleanFeedbackText") {
+                        // Mark as spoken after TTS completes
+                        currentItem.spokenOnce = true
+                    }
                 }
             }
             

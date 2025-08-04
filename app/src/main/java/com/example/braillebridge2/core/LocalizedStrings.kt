@@ -46,6 +46,9 @@ object LocalizedStrings {
         NO_FEEDBACK_TO_REPEAT,
         TRANSLATING_FEEDBACK,
         
+        // Spatial feature
+        TAKE_PHOTO_INSTRUCTION,
+        
         // General
         COULD_NOT_SWITCH_LANGUAGE
     }
@@ -77,6 +80,8 @@ object LocalizedStrings {
         StringKey.NO_FEEDBACK_TO_REPEAT to "No feedback to repeat",
         StringKey.TRANSLATING_FEEDBACK to "Translating feedback...",
         
+        StringKey.TAKE_PHOTO_INSTRUCTION to "Take a photo of your diagram with your finger pointing to an object",
+        
         StringKey.COULD_NOT_SWITCH_LANGUAGE to "Could not switch language"
     )
     
@@ -106,6 +111,8 @@ object LocalizedStrings {
         StringKey.FEEDBACK_PREFIX to "فیڈبیک",
         StringKey.NO_FEEDBACK_TO_REPEAT to "دہرانے کے لیے کوئی فیڈبیک نہیں",
         StringKey.TRANSLATING_FEEDBACK to "فیڈبیک کا ترجمہ کر رہا ہوں...",
+        
+        StringKey.TAKE_PHOTO_INSTRUCTION to "اپنے آریاگرام کی تصویر لیں جس میں آپ کی انگلی کسی چیز کی طرف اشارہ کر رہی ہو",
         
         StringKey.COULD_NOT_SWITCH_LANGUAGE to "زبان تبدیل نہیں کر سکے"
     )
