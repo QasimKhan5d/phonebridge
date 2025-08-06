@@ -43,7 +43,7 @@ The spatial screen allows students to take a photo of a diagram or image and rec
 
 ## Building and Running the App
 
-To build and run the app, you will need to have an Android phone with medium specs. Download and install the APK in the releases to start using it! The app initially takes some time to download Gemma 3N and then it spends around a minute to load the model in memory. Also, add your HuggingFace token in `phonebridge/app/src/main/java/com/example/braillebridge2/auth/AuthConfig.kt` 
+To build and run the app, you will need to have an Android phone with medium specs. Download and install the APK in the releases to start using it! The app initially takes some time to download Gemma 3N and then it spends around a minute to load the model in memory. Also, add your HuggingFace token in [AuthConfig.kt](app/src/main/java/com/example/braillebridge2/auth/AuthConfig.kt)
 
     const val HARDCODED_HF_TOKEN = "hf_..."
 
