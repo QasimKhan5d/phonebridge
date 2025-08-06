@@ -22,7 +22,7 @@ class PhotoCaptureHelper(private val context: Context) {
     private var currentPhotoUri: Uri? = null
     
     /**
-     * Create a camera intent for capturing homework answer photos
+     * Create a camera and gallery chooser intent for capturing homework answer photos
      */
     fun createCameraIntent(lessonIndex: Int): Intent? {
         return try {
@@ -49,42 +49,64 @@ class PhotoCaptureHelper(private val context: Context) {
                 putExtra(MediaStore.EXTRA_OUTPUT, currentPhotoUri)
             }
             
-            Log.i(TAG, "Created camera intent for: ${currentPhotoFile?.absolutePath}")
-            cameraIntent
+            // Create gallery intent
+            val galleryIntent = Intent(Intent.ACTION_PICK).apply {
+                type = "image/*"
+            }
+            
+            // Create chooser with both camera and gallery options
+            val chooserIntent = Intent.createChooser(galleryIntent, "Select homework answer photo").apply {
+                putExtra(Intent.EXTRA_INITIAL_INTENTS, arrayOf(cameraIntent))
+            }
+            
+            Log.i(TAG, "Created camera/gallery chooser intent for: ${currentPhotoFile?.absolutePath}")
+            chooserIntent
             
         } catch (e: Exception) {
-            Log.e(TAG, "Error creating camera intent: ${e.message}")
+            Log.e(TAG, "Error creating camera/gallery intent: ${e.message}")
             null
         }
     }
     
     /**
-     * Handle the result from camera capture
+     * Handle the result from camera capture or gallery selection
      */
-    fun handleCameraResult(resultCode: Int, callback: (Boolean, File?, String?) -> Unit) {
+    fun handleCameraResult(resultCode: Int, data: Intent?, callback: (Boolean, File?, String?) -> Unit) {
         try {
             if (resultCode == android.app.Activity.RESULT_OK) {
-                val photoFile = currentPhotoFile
-                if (photoFile?.exists() == true && photoFile.length() > 0) {
-                    Log.i(TAG, "Photo captured: ${photoFile.absolutePath} (${photoFile.length()} bytes)")
-                    callback(true, photoFile, null)
+                // Check if this was a gallery selection (has data URI) or camera capture
+                val selectedUri = data?.data
+                
+                if (selectedUri != null) {
+                    // This was a gallery selection - copy file to our photos directory
+                    Log.i(TAG, "Gallery photo selected: $selectedUri")
+                    copyGalleryImageToPhotoFile(selectedUri, callback)
                 } else {
-                    Log.w(TAG, "Photo file is empty or doesn't exist")
-                    callback(false, null, "Photo capture failed - file is empty")
+                    // This was a camera capture - check our photo file
+                    val photoFile = currentPhotoFile
+                    if (photoFile?.exists() == true && photoFile.length() > 0) {
+                        Log.i(TAG, "Photo captured: ${photoFile.absolutePath} (${photoFile.length()} bytes)")
+                        callback(true, photoFile, null)
+                    } else {
+                        Log.w(TAG, "Photo file is empty or doesn't exist")
+                        callback(false, null, "Photo capture failed - file is empty")
+                    }
                 }
             } else {
-                Log.w(TAG, "Camera capture cancelled by user")
-                callback(false, null, "Photo capture cancelled")
+                Log.w(TAG, "Photo selection cancelled by user")
+                callback(false, null, "Photo selection cancelled")
                 // Clean up the empty file if it was created
                 currentPhotoFile?.delete()
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error handling camera result: ${e.message}")
+            Log.e(TAG, "Error handling photo result: ${e.message}")
             callback(false, null, e.message)
         } finally {
-            // Reset for next capture
-            currentPhotoFile = null
-            currentPhotoUri = null
+            // Reset for next capture (only if camera capture, gallery doesn't use currentPhotoFile)
+            if (data?.data == null) {
+                currentPhotoFile = null
+                currentPhotoUri = null
+            }
         }
     }
     
@@ -99,6 +121,37 @@ class PhotoCaptureHelper(private val context: Context) {
             Log.i(TAG, "Photo capture cancelled and file cleaned up")
         } catch (e: Exception) {
             Log.e(TAG, "Error cancelling photo capture: ${e.message}")
+        }
+    }
+    
+    /**
+     * Copy selected gallery image to our photos directory
+     */
+    private fun copyGalleryImageToPhotoFile(selectedUri: Uri, callback: (Boolean, File?, String?) -> Unit) {
+        try {
+            val photoFile = currentPhotoFile ?: return callback(false, null, "No photo file prepared")
+            
+            context.contentResolver.openInputStream(selectedUri)?.use { inputStream ->
+                photoFile.outputStream().use { outputStream ->
+                    inputStream.copyTo(outputStream)
+                }
+            }
+            
+            if (photoFile.exists() && photoFile.length() > 0) {
+                Log.i(TAG, "Gallery image copied: ${photoFile.absolutePath} (${photoFile.length()} bytes)")
+                callback(true, photoFile, null)
+            } else {
+                Log.e(TAG, "Failed to copy gallery image")
+                callback(false, null, "Failed to copy selected image")
+            }
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error copying gallery image: ${e.message}")
+            callback(false, null, "Error copying selected image: ${e.message}")
+        } finally {
+            // Reset after gallery selection
+            currentPhotoFile = null
+            currentPhotoUri = null
         }
     }
     

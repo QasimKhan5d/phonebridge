@@ -16,6 +16,9 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        
+        // OAuth redirect scheme for AppAuth
+        manifestPlaceholders["appAuthRedirectScheme"] = "com.example.braillebridge2"
     }
 
     buildTypes {
@@ -48,6 +51,14 @@ dependencies {
     implementation("io.coil-kt:coil-compose:2.5.0")
     implementation("io.coil-kt:coil-svg:2.5.0")
     implementation("androidx.core:core-ktx:1.12.0")
+    
+    // OAuth and networking dependencies (similar to gallery app)
+    implementation("net.openid:appauth:0.11.1")
+    implementation("com.google.code.gson:gson:2.10.1")
+    implementation("androidx.work:work-runtime-ktx:2.9.0")
+    implementation("androidx.datastore:datastore-preferences:1.0.0")
+    implementation("androidx.browser:browser:1.8.0") // For CustomTabs like gallery app
+    
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.activity.compose)

@@ -13,6 +13,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlin.coroutines.resume
 import java.io.File
 
 private const val TAG = "MainViewModel"
@@ -31,6 +33,10 @@ class MainViewModel : ViewModel() {
     private var photoCaptureHelper: PhotoCaptureHelper? = null
     private var audioPlayerHelper: AudioPlayerHelper? = null
     private var gemmaHelper: GemmaHelper? = null
+    
+    // Debouncing for recording gestures to prevent double-tap issues
+    private var lastRecordingGestureTime = 0L
+    private val recordingGestureDebounceMs = 1000L // 1 second debounce
     
     /**
      * Initialize the app by scanning for lesson packs and feedback
@@ -109,15 +115,44 @@ class MainViewModel : ViewModel() {
     /**
      * Navigate to next homework item or return home if complete
      */
-    fun moveToNextHomeworkItem() {
+    fun moveToNextHomeworkItem(ttsHelper: TtsHelper, modelManager: LlmModelManager) {
         val currentState = _uiState.value
         if (currentState is AppState.Homework) {
             if (currentState.hasNextItem) {
-                _uiState.value = currentState.copy(
-                    currentIndex = currentState.currentIndex + 1,
-                    mode = HomeworkMode.VIEWING
-                )
-                Log.i(TAG, "Moved to item ${currentState.currentIndex + 1}")
+                val newIndex = currentState.currentIndex + 1
+                val newItem = currentState.pack.getItem(newIndex)
+                
+                if (newItem != null && currentState.language == Language.URDU) {
+                    // In Urdu mode, check if translation exists
+                    if (newItem.questionUrdu != null) {
+                        // Translation exists, move instantly
+                        _uiState.value = currentState.copy(
+                            currentIndex = newIndex,
+                            mode = HomeworkMode.VIEWING
+                        )
+                        Log.i(TAG, "Moved to item ${newIndex + 1} (Urdu translation available)")
+                    } else {
+                        // Show translating spinner and translate
+                        _uiState.value = currentState.copy(
+                            currentIndex = newIndex,
+                            mode = HomeworkMode.TRANSLATING
+                        )
+                        Log.i(TAG, "Moved to item ${newIndex + 1}, starting translation")
+                        
+                        val translatingMessage = LocalizedStrings.getString(LocalizedStrings.StringKey.TRANSLATING_FEEDBACK, Language.URDU)
+                        ttsHelper.speak(translatingMessage)
+                        
+                        // Start translation
+                        translateQuestionToUrdu(modelManager, newItem, ttsHelper, speakTranslatedQuestion = false)
+                    }
+                } else {
+                    // English mode or no item, move normally
+                    _uiState.value = currentState.copy(
+                        currentIndex = newIndex,
+                        mode = HomeworkMode.VIEWING
+                    )
+                    Log.i(TAG, "Moved to item ${newIndex + 1}")
+                }
             } else {
                 // Return to home
                 viewModelScope.launch {
@@ -157,7 +192,15 @@ class MainViewModel : ViewModel() {
             }
             HomeworkMode.RECORDING_VOICE -> {
                 if (gestureType == GestureType.TAP) {
-                    stopVoiceAnswer(currentState, ttsHelper)
+                    // Add debouncing to prevent double-tap issues
+                    val currentTime = System.currentTimeMillis()
+                    if (currentTime - lastRecordingGestureTime > recordingGestureDebounceMs) {
+                        lastRecordingGestureTime = currentTime
+                        Log.d(TAG, "Processing tap to stop recording")
+                        stopVoiceAnswer(currentState, ttsHelper)
+                    } else {
+                        Log.d(TAG, "Ignoring rapid tap gesture to prevent double-stop (${currentTime - lastRecordingGestureTime}ms since last)")
+                    }
                 }
             }
             HomeworkMode.ASKING_QUESTION -> {
@@ -169,6 +212,17 @@ class MainViewModel : ViewModel() {
             HomeworkMode.GEMMA_RESPONDING -> {
                 // Allow cancellation of Gemma response
                 cancelGemmaResponse()
+            }
+            HomeworkMode.TRANSLATING -> {
+                // Cannot interact during translation
+            }
+            HomeworkMode.LISTENING_AUDIO -> {
+                if (gestureType == GestureType.TAP) {
+                    // Stop audio playback and return to viewing mode
+                    Log.d(TAG, "Stopping audio playback due to user tap")
+                    audioPlayerHelper?.stopAudio()
+                    _uiState.value = currentState.copy(mode = HomeworkMode.VIEWING)
+                }
             }
             else -> {
                 // Other modes handled elsewhere
@@ -186,13 +240,41 @@ class MainViewModel : ViewModel() {
             return
         }
         
+        // First update UI to show recording mode (which will trigger "Recording started" TTS)
+        _uiState.value = currentState.copy(mode = HomeworkMode.RECORDING_VOICE)
+        
+        // Wait for TTS to complete before starting recording - no arbitrary delay!
+        Log.d(TAG, "Recording mode set, waiting for TTS completion signal from UI")
+    }
+    
+    /**
+     * Called by UI when "Recording started" TTS completes - starts actual recording
+     */
+    fun onRecordingTtsComplete() {
+        val currentState = _uiState.value
+        if (currentState !is AppState.Homework || currentState.mode != HomeworkMode.RECORDING_VOICE) {
+            Log.w(TAG, "TTS completion called but not in RECORDING_VOICE mode: ${currentState}")
+            return
+        }
+        
+        val currentItem = currentState.currentItem
+        if (currentItem == null || voiceRecorderHelper == null) {
+            Log.w(TAG, "Cannot start voice recording - missing item or helper")
+            _uiState.value = currentState.copy(mode = HomeworkMode.VIEWING)
+            return
+        }
+        
+        Log.d(TAG, "TTS completed, starting actual voice recording immediately")
         voiceRecorderHelper?.startRecording(currentItem.index) { success, error ->
             if (success) {
-                _uiState.value = currentState.copy(mode = HomeworkMode.RECORDING_VOICE)
                 Log.i(TAG, "Started voice answer recording for lesson ${currentItem.index}")
             } else {
                 Log.e(TAG, "Failed to start voice recording: $error")
-                // Stay in viewing mode if recording failed
+                // Return to viewing mode if recording failed
+                val latestState = _uiState.value
+                if (latestState is AppState.Homework) {
+                    _uiState.value = latestState.copy(mode = HomeworkMode.VIEWING)
+                }
             }
         }
     }
@@ -201,24 +283,55 @@ class MainViewModel : ViewModel() {
      * Stop voice answer recording
      */
     private fun stopVoiceAnswer(currentState: AppState.Homework, ttsHelper: TtsHelper? = null) {
+        // Check if we're still in recording mode before attempting to stop
+        val state = _uiState.value
+        if (state !is AppState.Homework || state.mode != HomeworkMode.RECORDING_VOICE) {
+            Log.d(TAG, "Not in recording mode, ignoring stop voice answer request")
+            return
+        }
+        
         voiceRecorderHelper?.stopRecording { success, file, error ->
             if (success && file != null) {
                 Log.i(TAG, "Voice answer saved: ${file.absolutePath}")
                 // TODO: Store the answer file path in the lesson state or database
+                
+                Log.d(TAG, "Starting audio playback for confirmation")
                 // Play back the recording for confirmation
-                audioPlayerHelper?.playAudio(file)
+                audioPlayerHelper?.playAudio(file,
+                    onComplete = {
+                        Log.d(TAG, "Audio playback completed callback triggered, adding small delay before returning to viewing mode")
+                        // Add a small delay to prevent immediate TTS overlap 
+                        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                            val finalState = _uiState.value
+                            if (finalState is AppState.Homework) {
+                                Log.d(TAG, "Transitioning from ${finalState.mode} to VIEWING mode after delay")
+                                _uiState.value = finalState.copy(mode = HomeworkMode.VIEWING)
+                            } else {
+                                Log.w(TAG, "Unexpected state during playback completion: $finalState")
+                            }
+                        }, 200) // Small delay to prevent TTS overlap
+                    },
+                    onError = { errorMsg ->
+                        Log.e(TAG, "Audio playback failed: $errorMsg")
+                        // Even if playback fails, return to viewing mode
+                        val finalState = _uiState.value
+                        if (finalState is AppState.Homework) {
+                            _uiState.value = finalState.copy(mode = HomeworkMode.VIEWING)
+                        }
+                    }
+                )
             } else {
                 Log.e(TAG, "Failed to save voice recording: $error")
-                val currentState = _uiState.value
-                if (currentState is AppState.Homework) {
-                    val message = LocalizedStrings.getString(LocalizedStrings.StringKey.RECORDING_FAILED, currentState.language)
+                val latestState = _uiState.value
+                if (latestState is AppState.Homework) {
+                    val message = LocalizedStrings.getString(LocalizedStrings.StringKey.RECORDING_FAILED, latestState.language)
                     ttsHelper?.speak(message)
+                    // Return to viewing mode immediately if recording failed
+                    _uiState.value = latestState.copy(mode = HomeworkMode.VIEWING)
                 } else {
                     ttsHelper?.speak("Recording failed")
                 }
             }
-            // Return to viewing mode regardless of success/failure
-            _uiState.value = currentState.copy(mode = HomeworkMode.VIEWING)
         }
     }
     
@@ -254,32 +367,44 @@ class MainViewModel : ViewModel() {
     /**
      * Handle photo capture result
      */
-    fun handlePhotoCaptureResult(resultCode: Int, modelManager: LlmModelManager? = null, ttsHelper: TtsHelper? = null) {
+    fun handlePhotoCaptureResult(resultCode: Int, data: android.content.Intent? = null, modelManager: LlmModelManager? = null, ttsHelper: TtsHelper? = null) {
         val currentState = _uiState.value
         
         when (currentState) {
             is AppState.Homework -> {
-                photoCaptureHelper?.handleCameraResult(resultCode) { success, file, error ->
+                photoCaptureHelper?.handleCameraResult(resultCode, data) { success, file, error ->
                     if (success && file != null) {
                         Log.i(TAG, "Photo answer saved: ${file.absolutePath}")
                         // TODO: Store the answer file path in the lesson state or database
                         val currentState = _uiState.value
                         if (currentState is AppState.Homework) {
                             val message = LocalizedStrings.getString(LocalizedStrings.StringKey.PHOTO_SAVED, currentState.language)
-                            ttsHelper?.speak(message)
+                            ttsHelper?.speak(message) {
+                                // Return to viewing mode after TTS completes
+                                val finalState = _uiState.value
+                                if (finalState is AppState.Homework) {
+                                    _uiState.value = finalState.copy(mode = HomeworkMode.VIEWING)
+                                }
+                            }
                         } else {
-                            ttsHelper?.speak("Photo saved")
+                            ttsHelper?.speak("Photo submitted") {
+                                // Return to viewing mode after TTS completes
+                                val finalState = _uiState.value
+                                if (finalState is AppState.Homework) {
+                                    _uiState.value = finalState.copy(mode = HomeworkMode.VIEWING)
+                                }
+                            }
                         }
                     } else {
                         Log.e(TAG, "Failed to save photo: $error")
+                        // Return to viewing mode immediately on error
+                        _uiState.value = currentState.copy(mode = HomeworkMode.VIEWING)
                     }
-                    // Return to viewing mode regardless of success/failure
-                    _uiState.value = currentState.copy(mode = HomeworkMode.VIEWING)
                 }
             }
             
             is AppState.Spatial -> {
-                photoCaptureHelper?.handleCameraResult(resultCode) { success, file, error ->
+                photoCaptureHelper?.handleCameraResult(resultCode, data) { success, file, error ->
                     if (success && file != null && modelManager != null && ttsHelper != null) {
                         Log.i(TAG, "Spatial photo captured: ${file.absolutePath}")
                         // Process spatial photo with Gemma
@@ -310,45 +435,7 @@ class MainViewModel : ViewModel() {
     
 
     
-    /**
-     * Switch language and update TTS
-     */
-    fun switchLanguage(ttsHelper: TtsHelper? = null, modelManager: LlmModelManager? = null): Language? {
-        val currentState = _uiState.value
-        Log.i(TAG, "switchLanguage called - Current state: $currentState")
-        if (currentState is AppState.Homework) {
-            Log.i(TAG, "Current language before switch: ${currentState.language}")
-            val newLanguage = when (currentState.language) {
-                Language.ENGLISH -> Language.URDU
-                Language.URDU -> Language.ENGLISH
-            }
-            _uiState.value = currentState.copy(language = newLanguage, mode = HomeworkMode.VIEWING)
-            Log.i(TAG, "Switched language to: $newLanguage")
-            Log.i(TAG, "New state after switch: ${_uiState.value}")
-            
-            // Update TTS language
-            ttsHelper?.setLanguage(newLanguage)
-            
-            // If switching to Urdu, translate question synchronously so it's ready for "repeat"
-            if (newLanguage == Language.URDU && modelManager != null && ttsHelper != null) {
-                val currentItem = currentState.currentItem
-                if (currentItem != null) {
-                    kotlinx.coroutines.runBlocking {
-                        translateQuestionToUrdu(modelManager, currentItem, ttsHelper, speakSwitch = false)
-                    }
-                    // speak confirmation + Urdu script once
-                    ttsHelper.speak(currentItem.scriptUr)
-                }
-            } else {
-                // English branch – speak confirmation once
-                val msg = LocalizedStrings.getString(LocalizedStrings.StringKey.SWITCHED_TO_ENGLISH, Language.ENGLISH)
-                ttsHelper?.speak(msg)
-            }
-            
-            return newLanguage
-        }
-        return null
-    }
+
     
     /**
      * Handle voice command result
@@ -363,41 +450,57 @@ class MainViewModel : ViewModel() {
                 
                 Log.i(TAG, "Listen command - Current language: ${currentState.language}")
                 if (currentItem != null) {
+                    // Set to LISTENING_AUDIO mode to prevent TTS announcements
+                    _uiState.value = currentState.copy(mode = HomeworkMode.LISTENING_AUDIO)
+                    
                     if (currentState.language == Language.ENGLISH) {
                         // Play English audio if available
                         if (audioPlayerHelper != null && currentItem.audioEn.exists()) {
                             Log.i(TAG, "Playing English audio description")
                             audioPlayerHelper?.playAudio(
                                 currentItem.audioEn,
-                                onComplete = { Log.i(TAG, "Audio description completed") },
+                                onComplete = { 
+                                    Log.i(TAG, "Audio description completed, returning to viewing mode")
+                                    // Return to viewing mode after audio completes
+                                    val finalState = _uiState.value
+                                    if (finalState is AppState.Homework) {
+                                        _uiState.value = finalState.copy(mode = HomeworkMode.VIEWING)
+                                    }
+                                },
                                 onError = { err ->
                                     Log.e(TAG, "Audio playback error: $err")
                                     val message = LocalizedStrings.getString(LocalizedStrings.StringKey.AUDIO_NOT_AVAILABLE, currentState.language)
                                     ttsHelper.speak(message)
+                                    // Return to viewing mode on error
+                                    val finalState = _uiState.value
+                                    if (finalState is AppState.Homework) {
+                                        _uiState.value = finalState.copy(mode = HomeworkMode.VIEWING)
+                                    }
                                 }
                             )
                         } else {
                             val message = LocalizedStrings.getString(LocalizedStrings.StringKey.AUDIO_NOT_AVAILABLE, currentState.language)
                             ttsHelper.speak(message)
+                            // Return to viewing mode after TTS
+                            _uiState.value = currentState.copy(mode = HomeworkMode.VIEWING)
                         }
                     } else {
                         // Urdu mode: TTS the Urdu script
                         val urduScript = currentItem.scriptUr
-                        ttsHelper.speak(urduScript)
+                        ttsHelper.speak(urduScript) {
+                            // Return to viewing mode after TTS completes
+                            Log.i(TAG, "Urdu script TTS completed, returning to viewing mode")
+                            val finalState = _uiState.value
+                            if (finalState is AppState.Homework) {
+                                _uiState.value = finalState.copy(mode = HomeworkMode.VIEWING)
+                            }
+                        }
                     }
                 } else {
-                    val currentState = _uiState.value
-                    if (currentState is AppState.Homework) {
-                        val message = LocalizedStrings.getString(LocalizedStrings.StringKey.NO_AUDIO_AVAILABLE, currentState.language)
-                        ttsHelper.speak(message)
-                    } else {
-                        ttsHelper.speak("No audio available")
-                    }
-                }
-                // Return to viewing mode for listen command
-                val currentStateForReturn = _uiState.value
-                if (currentStateForReturn is AppState.Homework) {
-                    _uiState.value = currentStateForReturn.copy(mode = HomeworkMode.VIEWING)
+                    val message = LocalizedStrings.getString(LocalizedStrings.StringKey.NO_AUDIO_AVAILABLE, currentState.language)
+                    ttsHelper.speak(message)
+                    // Return to viewing mode after error message
+                    _uiState.value = currentState.copy(mode = HomeworkMode.VIEWING)
                 }
             }
             "switch" -> {
@@ -406,32 +509,46 @@ class MainViewModel : ViewModel() {
                 if (currentState !is AppState.Homework) return
                 val currentItem = currentState.currentItem
                 
-                val newLanguage = switchLanguage(ttsHelper, modelManager)
-                
-                if (currentItem != null && newLanguage != null) {
-                    val newLangName = when (newLanguage) {
-                        Language.ENGLISH -> "English"
-                        Language.URDU -> "Urdu"
-                    }
-                    
-                    // TTS the script in the new language
-                    val scriptText = currentItem.getCurrentScript(newLanguage)
-                    val switchMessage = when (newLanguage) {
-                        Language.ENGLISH -> LocalizedStrings.getString(LocalizedStrings.StringKey.SWITCHED_TO_ENGLISH, newLanguage)
-                        Language.URDU -> LocalizedStrings.getString(LocalizedStrings.StringKey.SWITCHED_TO_URDU, newLanguage)
-                    }
-                    ttsHelper.speak("$switchMessage $scriptText")
-                } else if (newLanguage != null) {
-                    val switchMessage = when (newLanguage) {
-                        Language.ENGLISH -> LocalizedStrings.getString(LocalizedStrings.StringKey.SWITCHED_TO_ENGLISH, newLanguage)
-                        Language.URDU -> LocalizedStrings.getString(LocalizedStrings.StringKey.SWITCHED_TO_URDU, newLanguage)
-                    }
-                    ttsHelper.speak(switchMessage)
-                } else {
-                    val currentState = _uiState.value
-                    val language = if (currentState is AppState.Homework) currentState.language else Language.ENGLISH
-                    val message = LocalizedStrings.getString(LocalizedStrings.StringKey.COULD_NOT_SWITCH_LANGUAGE, language)
+                if (currentItem == null) {
+                    val message = LocalizedStrings.getString(LocalizedStrings.StringKey.COULD_NOT_SWITCH_LANGUAGE, currentState.language)
                     ttsHelper.speak(message)
+                    return
+                }
+                
+                // Switch language
+                val newLanguage = when (currentState.language) {
+                    Language.ENGLISH -> Language.URDU
+                    Language.URDU -> Language.ENGLISH
+                }
+                
+                // Update TTS language
+                ttsHelper.setLanguage(newLanguage)
+                
+                if (newLanguage == Language.URDU) {
+                    // Check if already translated
+                    if (currentItem.questionUrdu != null) {
+                        // Instant switch - already translated
+                        _uiState.value = currentState.copy(language = newLanguage, mode = HomeworkMode.VIEWING)
+                        val switchMessage = LocalizedStrings.getString(LocalizedStrings.StringKey.SWITCHED_TO_URDU, newLanguage)
+                        val questionText = currentItem.getCurrentQuestion(newLanguage)
+                        ttsHelper.speak("$switchMessage Question ${currentItem.index}. $questionText")
+                    } else {
+                        // Show translating spinner and translate
+                        _uiState.value = currentState.copy(language = newLanguage, mode = HomeworkMode.TRANSLATING)
+                        val translatingMessage = LocalizedStrings.getString(LocalizedStrings.StringKey.TRANSLATING_FEEDBACK, newLanguage)
+                        ttsHelper.speak(translatingMessage)
+                        
+                        // Start translation
+                        if (modelManager != null) {
+                            translateQuestionToUrdu(modelManager, currentItem, ttsHelper, speakTranslatedQuestion = true)
+                        }
+                    }
+                } else {
+                    // Switch to English - instant
+                    _uiState.value = currentState.copy(language = newLanguage, mode = HomeworkMode.VIEWING)
+                    val switchMessage = LocalizedStrings.getString(LocalizedStrings.StringKey.SWITCHED_TO_ENGLISH, newLanguage)
+                    val questionText = currentItem.getCurrentQuestion(newLanguage)
+                    ttsHelper.speak("$switchMessage Question ${currentItem.index}. $questionText")
                 }
             }
             "repeat" -> {
@@ -509,7 +626,7 @@ class MainViewModel : ViewModel() {
     /**
      * Translate question to Urdu and cache it
      */
-    fun translateQuestionToUrdu(modelManager: LlmModelManager, currentItem: LessonItem, ttsHelper: TtsHelper, speakSwitch: Boolean = true) {
+    fun translateQuestionToUrdu(modelManager: LlmModelManager, currentItem: LessonItem, ttsHelper: TtsHelper, speakTranslatedQuestion: Boolean = false) {
         if (currentItem.questionUrdu != null) {
             Log.i(TAG, "Question already translated, skipping")
             return
@@ -522,19 +639,61 @@ class MainViewModel : ViewModel() {
                 onResult = { translatedQuestion ->
                     currentItem.questionUrdu = translatedQuestion
                     Log.i(TAG, "Question translated to Urdu: $translatedQuestion")
-                    if (speakSwitch) {
-                        val scriptText = currentItem.getCurrentScript(Language.URDU)
+                    
+                    // Return to viewing mode
+                    val currentState = _uiState.value
+                    if (currentState is AppState.Homework) {
+                        _uiState.value = currentState.copy(mode = HomeworkMode.VIEWING)
+                    }
+                    
+                    if (speakTranslatedQuestion) {
                         val switchMessage = LocalizedStrings.getString(LocalizedStrings.StringKey.SWITCHED_TO_URDU, Language.URDU)
-                        ttsHelper.speak("$switchMessage $scriptText")
+                        val questionText = currentItem.getCurrentQuestion(Language.URDU)
+                        ttsHelper.speak("$switchMessage Question ${currentItem.index}. $questionText")
                     }
                 },
                 onError = { error ->
                     Log.e(TAG, "Translation failed: $error")
+                    
+                    // Return to viewing mode even on error
+                    val currentState = _uiState.value
+                    if (currentState is AppState.Homework) {
+                        _uiState.value = currentState.copy(mode = HomeworkMode.VIEWING)
+                    }
+                    
                     // Fall back to speaking just the switch message
                     val switchMessage = LocalizedStrings.getString(LocalizedStrings.StringKey.SWITCHED_TO_URDU, Language.URDU)
                     ttsHelper.speak(switchMessage)
                 }
             )
+        }
+    }
+    
+    /**
+     * Suspend version of translateQuestionToUrdu that waits for completion
+     */
+    suspend fun translateQuestionToUrduSuspend(modelManager: LlmModelManager, currentItem: LessonItem): Boolean {
+        if (currentItem.questionUrdu != null) {
+            Log.i(TAG, "Question already translated, skipping")
+            return true
+        }
+        
+        return suspendCancellableCoroutine { continuation ->
+            viewModelScope.launch {
+                gemmaHelper?.translateQuestionToUrdu(
+                    modelManager = modelManager,
+                    question = currentItem.question,
+                    onResult = { translatedQuestion ->
+                        currentItem.questionUrdu = translatedQuestion
+                        Log.i(TAG, "Question translated to Urdu: $translatedQuestion")
+                        continuation.resume(true)
+                    },
+                    onError = { error ->
+                        Log.e(TAG, "Translation failed: $error")
+                        continuation.resume(false)
+                    }
+                )
+            }
         }
     }
     

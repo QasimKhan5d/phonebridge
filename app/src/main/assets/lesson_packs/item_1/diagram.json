@@ -1,23 +1,33 @@
 {
-  "title": "Adaptations of a Cactus to Desert Life",
-  "description": "This diagram shows how a cactus has special features that help it survive in a hot, dry desert environment.",
-  "adaptations": [
+  "diagram_title": "Monarch Butterfly Life Cycle",
+  "layout_description": "The diagram illustrates the four stages of a Monarch butterfly's life cycle in a circular flow.",
+  "key_elements": [
     {
-      "name": "Small Surface Area",
-      "details": "The cactus has a small surface area, which helps minimize water loss through evaporation into the air."
+      "name": "Egg",
+      "location": "Top center",
+      "description": "A small, pale yellow egg is shown laid on a green leaf.",
+      "action": "The life cycle begins with an egg laid on a leaf."
     },
     {
-      "name": "Spines Instead of Leaves",
-      "details": "Cacti have spines instead of leaves. This reduces the surface area exposed to the sun and wind, minimizing water loss and also provides protection from animals that might eat the cactus."
+      "name": "Larva (Caterpillar)",
+      "location": "Top right",
+      "description": "A larva, commonly known as a caterpillar, is shown munching on a leaf. It has black, yellow, and white stripes.",
+      "action": "The egg hatches into a larva (caterpillar), which eats and grows."
     },
     {
-      "name": "Stems That Can Store Water",
-      "details": "The thick stems of a cactus can store large amounts of water, which the plant uses when there is no rain."
+      "name": "Pupa (Chrysalis)",
+      "location": "Bottom right",
+      "description": "A pupa, also known as a chrysalis, is shown hanging upside down from a stem. It is green and smooth.",
+      "action": "The larva transforms into a pupa (chrysalis), inside which it undergoes metamorphosis."
     },
     {
-      "name": "Widespread Root System",
-      "details": "The cactus has a widespread root system that spreads out beneath the ground. This allows the plant to absorb water quickly from even small amounts of rainfall."
+      "name": "Adult Butterfly",
+      "location": "Bottom left",
+      "description": "An adult Monarch butterfly is shown with bright orange and black wings, and white spots.",
+      "action": "The pupa emerges as an adult butterfly, which lays eggs and continues the life cycle."
     }
   ],
-  "environment": "Desert - hot and dry with little rainfall."
+  "main_process": "Metamorphosis: A butterfly undergoes complete metamorphosis, transforming from an egg to a larva (caterpillar), then to a pupa (chrysalis), and finally to an adult butterfly.",
+  "flow_details": "The diagram shows a circular flow starting with the egg, followed by the larva (caterpillar), pupa (chrysalis), and ending with the adult butterfly. The adult butterfly then lays eggs, restarting the cycle.",
+  "overall_summary": "This diagram depicts the four stages of a Monarch butterfly's life cycle: egg, larva (caterpillar), pupa (chrysalis), and adult butterfly. This process is called metamorphosis, where the butterfly changes drastically during its life."
 }

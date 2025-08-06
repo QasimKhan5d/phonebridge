@@ -1,5 +1,6 @@
 package com.example.braillebridge2.ui
 
+import android.util.Log
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
@@ -24,20 +25,26 @@ fun HomeScreen(
     state: AppState.Home,
     viewModel: MainViewModel,
     ttsHelper: TtsHelper,
+    isTtsReady: Boolean = ttsHelper.isReady,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     
-    // Announce notifications when screen loads
-    LaunchedEffect(state.notification) {
-        val notificationMessage = when (state.notification) {
-            NotificationType.HOMEWORK -> "You have new homework, tap once to open it."
-            NotificationType.FEEDBACK -> "You have new feedback, tap twice to open it."
-            NotificationType.BOTH -> "You have new homework and feedback. Tap once for homework, twice for feedback."
-            NotificationType.NONE -> "No new notifications."
+    // Announce notifications when screen loads - wait for TTS to be ready
+    LaunchedEffect(state.notification, isTtsReady) {
+        if (isTtsReady) {
+            val notificationMessage = when (state.notification) {
+                NotificationType.HOMEWORK -> "You have new homework, tap once to open it."
+                NotificationType.FEEDBACK -> "You have new feedback, tap twice to open it."
+                NotificationType.BOTH -> "You have new homework and feedback. Tap once for homework, twice for feedback."
+                NotificationType.NONE -> "No new notifications."
+            }
+            val fullMessage = "$notificationMessage Hold to understand a diagram."
+            Log.d("HomeScreen", "TTS is ready, speaking: $fullMessage")
+            ttsHelper.speak(fullMessage)
+        } else {
+            Log.d("HomeScreen", "TTS not ready yet, waiting...")
         }
-        val fullMessage = "$notificationMessage Hold to understand a diagram."
-        ttsHelper.speak(fullMessage)
     }
     
     Box(

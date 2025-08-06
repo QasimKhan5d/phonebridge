@@ -56,8 +56,8 @@ class TtsHelper(
                             onComplete()
                         }
                     }
-                    override fun onError(utteranceId: String?) {
-                        if (utteranceId == utteranceId) {
+                    override fun onError(errorUtteranceId: String?) {
+                        if (errorUtteranceId == utteranceId) {
                             onComplete() // Call completion even on error
                         }
                     }

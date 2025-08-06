@@ -97,7 +97,9 @@ enum class HomeworkMode {
     RECORDING_PHOTO,   // Taking photo answer
     AWAITING_COMMAND,  // Listening for voice commands
     ASKING_QUESTION,   // Recording question for Gemma
-    GEMMA_RESPONDING   // Gemma is generating response
+    GEMMA_RESPONDING,  // Gemma is generating response
+    TRANSLATING,       // Translating question to another language
+    LISTENING_AUDIO    // Playing lesson audio (no TTS announcements)
 }
 
 /**

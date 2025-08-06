@@ -1,0 +1,39 @@
+{
+  "diagram_title": "Fault Diagram",
+  "layout_description": "The diagram shows a geological fault where two blocks of Earth's crust have moved relative to each other due to stress.",
+  "key_elements": [
+    {
+      "name": "Foot Wall",
+      "location": "Below the fault plane",
+      "description": "The block of Earth's crust below the fault plane. It has moved downward relative to the hanging wall.",
+      "action": "Moved downward relative to the hanging wall."
+    },
+    {
+      "name": "Hanging Wall",
+      "location": "Above the fault plane",
+      "description": "The block of Earth's crust above the fault plane. It has moved upward relative to the foot wall.",
+      "action": "Moved upward relative to the foot wall."
+    },
+    {
+      "name": "Fault Plane",
+      "location": "The fracture or zone of fractures between the two blocks of Earth's crust.",
+      "description": "The surface along which the blocks of crust have moved past each other.",
+      "action": "The surface along which the two blocks of crust moved relative to each other."
+    },
+    {
+      "name": "Fault Scarp",
+      "location": "The steep cliff formed along the fault line on the surface of the Earth.",
+      "description": "The visible cliff created by the movement along the fault plane.",
+      "action": "Formed on the surface of the Earth due to movement along the fault plane."
+    },
+    {
+      "name": "Fault Line",
+      "location": "The straight line on the surface of the Earth that marks the trace of the fault plane.",
+      "description": "A straight line on the Earth's surface indicating the path of the fault plane.",
+      "action": "Marks the path of the fault plane on the surface of the Earth."
+    }
+  ],
+  "main_process": "Faulting occurs when stress builds up in the Earth's crust. This stress exceeds the strength of the rock, causing it to fracture and move along a fault plane.",
+  "flow_details": "The fault plane is the surface along which the two blocks of Earth's crust (foot wall and hanging wall) move. Movement along the fault plane results in a fault scarp on the Earth's surface and a fault line indicating the path of the fault plane.",
+  "overall_summary": "A fault is a fracture in the Earth's crust where two blocks have moved relative to each other. This movement is caused by stress building up in the crust."
+}

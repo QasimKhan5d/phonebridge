@@ -32,25 +32,25 @@ class GemmaHelper {
             return
         }
         
+        val prompt = "Translate this sentence to Urdu: $question. Do not include any other text or explanation. Only respond with the Urdu script."
+        Log.i(TAG, "Translating question: $prompt")
+        
         try {
-            val llmInstance = modelManager.instance!!
-            val llmSession = llmInstance.session
-            
-            val prompt = "Translate this English question to Urdu. Only provide the translation, no additional text: $question"
-            
-            llmSession.addQueryChunk(prompt)
-            
-            var result = ""
-            llmSession.generateResponseAsync { partialResult, done ->
-                result = partialResult
-                if (done) {
-                    onResult(result.trim())
-                }
+            val response = withContext(Dispatchers.Default) {
+                val llmSession = modelManager.instance!!.session
+                
+                // Wait a bit to ensure any previous operations are complete
+                kotlinx.coroutines.delay(100)
+                
+                // Clear session state and add new query
+                llmSession.addQueryChunk(prompt)
+                llmSession.generateResponse()
             }
-            
+            Log.i(TAG, "Question translation result: '$response'")
+            onResult(response.trim())
         } catch (e: Exception) {
-            Log.e(TAG, "Translation error: ${e.message}")
-            onError("Translation failed: ${e.message}")
+            Log.e(TAG, "Question translation error: ${e.message}")
+            onError("Question translation failed: ${e.message}")
         }
     }
     
@@ -395,7 +395,7 @@ class GemmaHelper {
                 if (!conversationInitialized) {
                     val languageInstruction = if (language == Language.URDU) "Respond in Urdu only." else ""
                     val basePrompt = """
-                        You are Gemma, an AI guide that helps blind or visually-impaired children explore diagrams and pictures with their fingertips.
+                        You are an AI guide that helps blind or visually-impaired children explore diagrams and pictures with their fingertips.
 
                         === TASK ===
                         For **each** image you receive:
@@ -403,8 +403,9 @@ class GemmaHelper {
                         2. Detect the child's finger (the pointing tip) and the single object it touches.
                         3. Infer the *role or function* of that pointed-to object within the context of the diagram (e.g., “heart pumps blood”, “USB port lets data in/out”).
                         4. Determine the 2-3 nearest objects the child could easily trace their finger to next.
-                        5. Work out clear spatial relationships using vocabulary a 7-year-old can grasp (above, below, beside, left/right of, in the center, at the edge, etc.).
+                        5. Work out clear spatial relationships using vocabulary a 7-year-old can grasp (above, below, left/right of, at the edge of the paper, on the corner, etc).
                         6. Note visible colors, basic shapes, and relative sizes where helpful.
+                        7. Use directive language for nearby objects like, "if you move your finger a little bit to the right, then you can find the XYZ which does ABC"
 
                         === RESPONSE RULES ===
                         * **Length:** 1-2 short sentences (≈ 10-15 seconds spoken).
@@ -414,10 +415,7 @@ class GemmaHelper {
                         * State its role/function in 1-2 words if obvious (e.g., “the heart - it pumps blood”).
                         * Describe its location in the diagram using spatial words.
                         * Mention the nearest object(s) the child can reach next, with one spatial cue each.
-                        * **Do not** reveal your reasoning process or mention “I see”, “analysis”, bounding boxes, or model internals.
-
-                        === OUTPUT TEMPLATE ===
-                        “<Pointed-object>, <tiny function/role>, is <spatial position>. Right next to it is <nearest-object-1>, and just <spatial relation> is <nearest-object-2>.”
+                        * Do not use vague language like "next to" or "nearby" — always be specific (e.g., "to the left of the circle", "below the red square").
 
                         $languageInstruction
 

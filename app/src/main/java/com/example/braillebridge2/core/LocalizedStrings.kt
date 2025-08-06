@@ -31,6 +31,7 @@ object LocalizedStrings {
         // Question handling
         QUESTION_PREFIX,
         NO_QUESTION_TO_REPEAT,
+        HOMEWORK_INSTRUCTIONS,
         
         // Recording and camera
         RECORDING_STARTED_TAP_TO_STOP,
@@ -64,10 +65,11 @@ object LocalizedStrings {
         StringKey.AUDIO_NOT_AVAILABLE to "Audio not available",
         StringKey.NO_AUDIO_AVAILABLE to "No audio available",
         StringKey.RECORDING_FAILED to "Recording failed",
-        StringKey.PHOTO_SAVED to "Photo saved",
+        StringKey.PHOTO_SAVED to "Photo submitted",
         
         StringKey.QUESTION_PREFIX to "Question",
         StringKey.NO_QUESTION_TO_REPEAT to "No question to repeat",
+        StringKey.HOMEWORK_INSTRUCTIONS to "When you are ready, tap to answer by voice, double tap to answer by photo, or hold to speak a command.",
         
         StringKey.RECORDING_STARTED_TAP_TO_STOP to "Recording started. Tap again to stop.",
         StringKey.CAMERA_OPENED_FOR_PHOTO to "Camera opened for photo answer.",
@@ -96,10 +98,11 @@ object LocalizedStrings {
         StringKey.AUDIO_NOT_AVAILABLE to "آڈیو دستیاب نہیں",
         StringKey.NO_AUDIO_AVAILABLE to "کوئی آڈیو دستیاب نہیں",
         StringKey.RECORDING_FAILED to "ریکارڈنگ ناکام",
-        StringKey.PHOTO_SAVED to "تصویر محفوظ ہو گئی",
+        StringKey.PHOTO_SAVED to "تصویر جمع کرائی گئی",
         
         StringKey.QUESTION_PREFIX to "سوال",
         StringKey.NO_QUESTION_TO_REPEAT to "دہرانے کے لیے کوئی سوال نہیں",
+        StringKey.HOMEWORK_INSTRUCTIONS to "جب آپ تیار ہوں تو آواز سے جواب دینے کے لیے ٹیپ کریں، تصویر سے جواب دینے کے لیے ڈبل ٹیپ کریں، یا کمانڈ بولنے کے لیے دبائیں۔",
         
         StringKey.RECORDING_STARTED_TAP_TO_STOP to "ریکارڈنگ شروع ہو گئی۔ رکنے کے لیے دوبارہ ٹیپ کریں۔",
         StringKey.CAMERA_OPENED_FOR_PHOTO to "تصویر کے جواب کے لیے کیمرا کھل گیا۔",

@@ -52,7 +52,7 @@ fun SpatialScreen(
     val cameraLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        viewModel.handlePhotoCaptureResult(result.resultCode, modelManager, ttsHelper)
+        viewModel.handlePhotoCaptureResult(result.resultCode, result.data, modelManager, ttsHelper)
     }
     
     // Permission launcher for camera

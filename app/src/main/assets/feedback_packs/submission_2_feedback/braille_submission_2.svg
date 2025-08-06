@@ -7,10 +7,10 @@
             .braille-text { font-family: SimBraille, sans-serif; font-size: 32px; fill: black; }
           </style>
           <text x="10" y="50" class="braille-text">
-            <tspan>⠅⠊⠅⠪⠎⠀⠃⠓⠞⠀⠎⠁⠀⠏⠁</tspan><tspan>⠝⠊⠀⠮⠭⠊⠗</tspan><tspan>⠓⠀ ⠅⠗⠀⠎⠅⠞⠁⠀⠓⠌⠀⠅⠊⠺⠝⠅⠓⠀⠺⠓⠀⠎⠃⠵⠀ ⠀⠓⠺⠞⠌⠀⠓⠊⠰</tspan>
+            <tspan>⠊⠓⠀⠵⠍⠊⠝⠀⠅⠌⠀⠁</tspan><tspan>⠝⠙⠗⠀⠺⠁⠟⠷⠀⠓</tspan><tspan>⠌</tspan>
           </text>
-          <g transform="translate(250, 55)">
-            <use href="#squiggly" transform="scale(9.1, 1)"/>
+          <g transform="translate(202, 55)">
+            <use href="#squiggly" transform="scale(13, 1)"/>
           </g>
         </svg>
       

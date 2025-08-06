@@ -42,8 +42,8 @@ import java.io.File
 import java.util.*
 
 class MainActivity : ComponentActivity() {
-    // Use gallery app pattern for model management
-    private val modelManager = LlmModelManager()
+    // Use shared model manager from ModelCheckActivity or create new one as fallback
+    private lateinit var modelManager: LlmModelManager
     private lateinit var ttsHelper: TtsHelper
     private lateinit var modelPath: String
     private var isModelLoaded by mutableStateOf(false)
@@ -51,6 +51,7 @@ class MainActivity : ComponentActivity() {
     @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Log.d("MainActivity", "MainActivity onCreate() called")
         enableEdgeToEdge()
         
         // Use external files directory like the gallery app does
@@ -61,8 +62,18 @@ class MainActivity : ComponentActivity() {
             // TTS is ready callback
         }
         
-        // Initialize the LLM inference task on background thread using gallery app pattern
-        initializeLlmInferenceAsync()
+        // Use shared model manager from ModelCheckActivity if available, otherwise create new one
+        modelManager = ModelCheckActivity.sharedModelManager ?: LlmModelManager()
+        
+        // Check if model is already initialized from ModelCheckActivity
+        if (modelManager.isReady()) {
+            Log.i("LlmInference", "Model already initialized from ModelCheckActivity")
+            isModelLoaded = true
+        } else {
+            // Initialize the LLM inference task on background thread using gallery app pattern
+            Log.i("LlmInference", "Model not initialized, starting initialization...")
+            initializeLlmInferenceAsync()
+        }
         
         setContent {
             BrailleBridge2Theme {
@@ -310,6 +321,17 @@ fun BrailleBridgeApp(
     val uiState by mainViewModel.uiState.collectAsState()
     val context = LocalContext.current
     
+    // Track TTS readiness state for recomposition
+    var isTtsReady by remember { mutableStateOf(ttsHelper.isReady) }
+    
+    // Check TTS readiness periodically until it's ready
+    LaunchedEffect(Unit) {
+        while (!isTtsReady) {
+            kotlinx.coroutines.delay(100) // Check every 100ms
+            isTtsReady = ttsHelper.isReady
+        }
+    }
+    
     // Initialize the app when it starts
     LaunchedEffect(Unit) {
         mainViewModel.initialize(context)
@@ -339,6 +361,7 @@ fun BrailleBridgeApp(
                 state = currentState,
                 viewModel = mainViewModel,
                 ttsHelper = ttsHelper,
+                isTtsReady = isTtsReady,
                 modifier = modifier
             )
         }

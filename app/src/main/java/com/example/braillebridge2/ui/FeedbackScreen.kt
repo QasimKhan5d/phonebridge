@@ -1,6 +1,11 @@
 package com.example.braillebridge2.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.speech.SpeechRecognizer
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.core.content.ContextCompat
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
@@ -117,6 +122,15 @@ fun FeedbackScreen(
     val currentItem = state.currentItem
     var speechRecognizer by remember { mutableStateOf<SpeechRecognizer?>(null) }
     
+    // Permission launcher for audio recording
+    val audioPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { isGranted: Boolean ->
+        if (isGranted) {
+            // Audio permission granted, will trigger speech recognition through state change
+        }
+    }
+    
     // Handle mode changes and trigger appropriate actions
     LaunchedEffect(state.mode) {
         when (state.mode) {
@@ -138,46 +152,70 @@ fun FeedbackScreen(
             }
             
             FeedbackMode.AWAITING_COMMAND -> {
-                val message = LocalizedStrings.getString(LocalizedStrings.StringKey.FEEDBACK_LISTENING_FOR_COMMAND, state.language)
-                ttsHelper.speak(message) {
-                    // Start speech recognition after TTS completes
-                    SpeechHelper.startSpeechRecognition(
-                        context = context,
-                        language = state.language,
-                        onResult = { recognizedText ->
-                            viewModel.handleFeedbackVoiceCommand(recognizedText, ttsHelper, modelManager)
-                            speechRecognizer = null
-                        },
-                        onError = {
-                            val errorMessage = LocalizedStrings.getString(LocalizedStrings.StringKey.COMMAND_NOT_HEARD, state.language)
-                            ttsHelper.speak(errorMessage)
-                            viewModel.handleFeedbackVoiceCommand("", ttsHelper, modelManager) // Return to viewing mode
-                            speechRecognizer = null
-                        },
-                        onStart = { recognizer ->
-                            speechRecognizer = recognizer
+                // Check microphone permission first before starting speech recognition
+                when (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)) {
+                    PackageManager.PERMISSION_GRANTED -> {
+                        val message = LocalizedStrings.getString(LocalizedStrings.StringKey.FEEDBACK_LISTENING_FOR_COMMAND, state.language)
+                        ttsHelper.speak(message) {
+                            // Add a small delay to ensure TTS audio output has fully finished
+                            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                                // Start speech recognition after TTS completes and brief delay
+                                SpeechHelper.startSpeechRecognition(
+                                    context = context,
+                                    language = state.language,
+                                    onResult = { recognizedText ->
+                                        viewModel.handleFeedbackVoiceCommand(recognizedText, ttsHelper, modelManager)
+                                        speechRecognizer = null
+                                    },
+                                    onError = {
+                                        val errorMessage = LocalizedStrings.getString(LocalizedStrings.StringKey.COMMAND_NOT_HEARD, state.language)
+                                        ttsHelper.speak(errorMessage)
+                                        viewModel.handleFeedbackVoiceCommand("", ttsHelper, modelManager) // Return to viewing mode
+                                        speechRecognizer = null
+                                    },
+                                    onStart = { recognizer ->
+                                        speechRecognizer = recognizer
+                                    }
+                                )
+                            }, 500) // 500ms delay to ensure audio output finishes
                         }
-                    )
+                    }
+                    else -> {
+                        // Request microphone permission if not granted
+                        audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    }
                 }
             }
             
             FeedbackMode.ASKING_QUESTION -> {
-                val message = LocalizedStrings.getString(LocalizedStrings.StringKey.QUESTION_RECORDING_STARTED, state.language)
-                ttsHelper.speak(message) {
-                    // Start speech recognition after TTS completes
-                    SpeechHelper.startSpeechRecognition(
-                        context = context,
-                        language = state.language,
-                        onResult = { recognizedText ->
-                            viewModel.onFeedbackQuestionRecordingResult(recognizedText, modelManager, ttsHelper)
-                        },
-                        onError = {
-                            viewModel.onFeedbackQuestionRecordingError(state, ttsHelper)
-                        },
-                        onStart = { recognizer ->
-                            speechRecognizer = recognizer
+                // Check microphone permission first before starting speech recognition
+                when (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)) {
+                    PackageManager.PERMISSION_GRANTED -> {
+                        val message = LocalizedStrings.getString(LocalizedStrings.StringKey.QUESTION_RECORDING_STARTED, state.language)
+                        ttsHelper.speak(message) {
+                            // Add a small delay to ensure TTS audio output has fully finished
+                            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                                // Start speech recognition after TTS completes and brief delay
+                                SpeechHelper.startSpeechRecognition(
+                                    context = context,
+                                    language = state.language,
+                                    onResult = { recognizedText ->
+                                        viewModel.onFeedbackQuestionRecordingResult(recognizedText, modelManager, ttsHelper)
+                                    },
+                                    onError = {
+                                        viewModel.onFeedbackQuestionRecordingError(state, ttsHelper)
+                                    },
+                                    onStart = { recognizer ->
+                                        speechRecognizer = recognizer
+                                    }
+                                )
+                            }, 500) // 500ms delay to ensure audio output finishes
                         }
-                    )
+                    }
+                    else -> {
+                        // Request microphone permission if not granted
+                        audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    }
                 }
             }
             

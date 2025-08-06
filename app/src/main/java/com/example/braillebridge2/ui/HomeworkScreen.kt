@@ -6,6 +6,7 @@ import android.speech.SpeechRecognizer
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import android.util.Log
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -49,7 +50,7 @@ fun HomeworkScreen(
     val cameraLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        viewModel.handlePhotoCaptureResult(result.resultCode, null, ttsHelper)
+        viewModel.handlePhotoCaptureResult(result.resultCode, result.data, null, ttsHelper)
     }
     
     // Permission launcher for camera
@@ -73,11 +74,33 @@ fun HomeworkScreen(
         }
     }
     
-    // Announce question when screen loads or item changes
-    LaunchedEffect(state.currentIndex) {
-        currentItem?.let { item ->
-            val announcement = "Question ${item.index}. ${item.question}. When you are ready, tap to answer by voice, double tap to answer by photo, or hold to speak a command."
-            ttsHelper.speak(announcement)
+    // Track previous mode to detect transitions from RECORDING_VOICE
+    var previousMode by remember { mutableStateOf(state.mode) }
+    
+    // Detect mode transitions to set flag when returning from voice recording
+    LaunchedEffect(state.mode) {
+        if (previousMode == HomeworkMode.RECORDING_VOICE && state.mode == HomeworkMode.VIEWING) {
+            Log.d("HomeworkScreen", "Detected transition from RECORDING_VOICE to VIEWING - suppressing TTS")
+            // Add a short delay, then allow TTS again
+            kotlinx.coroutines.delay(500)
+            Log.d("HomeworkScreen", "Delay complete, TTS can resume on next state change")
+        }
+        previousMode = state.mode
+    }
+    
+    // Announce question when screen loads or item changes (only in VIEWING mode)
+    LaunchedEffect(state.currentIndex, state.language, state.mode) {
+        // Only announce if we're in VIEWING mode AND not transitioning from RECORDING_VOICE
+        if (state.mode == HomeworkMode.VIEWING && previousMode != HomeworkMode.RECORDING_VOICE) {
+            currentItem?.let { item ->
+                val questionText = item.getCurrentQuestion(state.language)
+                val instructions = LocalizedStrings.getString(LocalizedStrings.StringKey.HOMEWORK_INSTRUCTIONS, state.language)
+                val announcement = "Question ${item.index}. ${questionText}. $instructions"
+                Log.i("HomeworkScreen", "About to announce: '$announcement'")
+                ttsHelper.speak(announcement)
+            }
+        } else if (state.mode == HomeworkMode.VIEWING && previousMode == HomeworkMode.RECORDING_VOICE) {
+            Log.d("HomeworkScreen", "Suppressing TTS announcement due to voice recording completion")
         }
     }
     
@@ -131,7 +154,11 @@ fun HomeworkScreen(
                 when (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)) {
                     PackageManager.PERMISSION_GRANTED -> {
                         val message = LocalizedStrings.getString(LocalizedStrings.StringKey.RECORDING_STARTED_TAP_TO_STOP, state.language)
-                        ttsHelper.speak(message)
+                        ttsHelper.speak(message) {
+                            // TTS completed - notify ViewModel to start actual recording
+                            Log.d("HomeworkScreen", "Recording TTS completed, notifying ViewModel")
+                            viewModel.onRecordingTtsComplete()
+                        }
                     }
                     else -> {
                         audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
@@ -139,49 +166,79 @@ fun HomeworkScreen(
                 }
             }
             HomeworkMode.AWAITING_COMMAND -> {
-                val message = LocalizedStrings.getString(LocalizedStrings.StringKey.LISTENING_FOR_COMMAND, state.language)
-                ttsHelper.speak(message) {
-                    // Start speech recognition after TTS completes
-                    SpeechHelper.startSpeechRecognition(
-                        context = context,
-                        language = state.language,
-                        onResult = { recognizedText ->
-                            viewModel.handleVoiceCommand(recognizedText, ttsHelper, modelManager)
-                            speechRecognizer = null
-                        },
-                        onError = {
-                            val errorMessage = LocalizedStrings.getString(LocalizedStrings.StringKey.COMMAND_NOT_HEARD, state.language)
-                            ttsHelper.speak(errorMessage)
-                            viewModel.handleVoiceCommand("", ttsHelper, modelManager) // Return to viewing mode
-                            speechRecognizer = null
-                        },
-                        onStart = { recognizer ->
-                            speechRecognizer = recognizer
+                // Check microphone permission first before starting speech recognition
+                when (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)) {
+                    PackageManager.PERMISSION_GRANTED -> {
+                        val message = LocalizedStrings.getString(LocalizedStrings.StringKey.LISTENING_FOR_COMMAND, state.language)
+                        ttsHelper.speak(message) {
+                            // Add a small delay to ensure TTS audio output has fully finished
+                            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                                // Start speech recognition after TTS completes and brief delay
+                                SpeechHelper.startSpeechRecognition(
+                                    context = context,
+                                    language = state.language,
+                                    onResult = { recognizedText ->
+                                        viewModel.handleVoiceCommand(recognizedText, ttsHelper, modelManager)
+                                        speechRecognizer = null
+                                    },
+                                    onError = {
+                                        val errorMessage = LocalizedStrings.getString(LocalizedStrings.StringKey.COMMAND_NOT_HEARD, state.language)
+                                        ttsHelper.speak(errorMessage)
+                                        viewModel.handleVoiceCommand("", ttsHelper, modelManager) // Return to viewing mode
+                                        speechRecognizer = null
+                                    },
+                                    onStart = { recognizer ->
+                                        speechRecognizer = recognizer
+                                    }
+                                )
+                            }, 500) // 500ms delay to ensure audio output finishes
                         }
-                    )
+                    }
+                    else -> {
+                        // Request microphone permission if not granted
+                        audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    }
                 }
             }
             HomeworkMode.ASKING_QUESTION -> {
-                val message = LocalizedStrings.getString(LocalizedStrings.StringKey.QUESTION_RECORDING_STARTED, state.language)
-                ttsHelper.speak(message) {
-                    // Start speech recognition after TTS completes
-                    SpeechHelper.startSpeechRecognition(
-                        context = context,
-                        language = state.language,
-                        onResult = { recognizedText ->
-                            viewModel.onQuestionRecordingResult(recognizedText, modelManager, ttsHelper)
-                        },
-                        onError = {
-                            viewModel.onQuestionRecordingError(state, ttsHelper)
-                        },
-                        onStart = { recognizer ->
-                            speechRecognizer = recognizer
+                // Check microphone permission first before starting speech recognition
+                when (ContextCompat.checkSelfPermission(context, Manifest.permission.RECORD_AUDIO)) {
+                    PackageManager.PERMISSION_GRANTED -> {
+                        val message = LocalizedStrings.getString(LocalizedStrings.StringKey.QUESTION_RECORDING_STARTED, state.language)
+                        ttsHelper.speak(message) {
+                            // Add a small delay to ensure TTS audio output has fully finished
+                            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                                // Start speech recognition after TTS completes and brief delay
+                                SpeechHelper.startSpeechRecognition(
+                                    context = context,
+                                    language = state.language,
+                                    onResult = { recognizedText ->
+                                        viewModel.onQuestionRecordingResult(recognizedText, modelManager, ttsHelper)
+                                    },
+                                    onError = {
+                                        viewModel.onQuestionRecordingError(state, ttsHelper)
+                                    },
+                                    onStart = { recognizer ->
+                                        speechRecognizer = recognizer
+                                    }
+                                )
+                            }, 500) // 500ms delay to ensure audio output finishes
                         }
-                    )
+                    }
+                    else -> {
+                        // Request microphone permission if not granted
+                        audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
+                    }
                 }
             }
             HomeworkMode.GEMMA_RESPONDING -> {
                 // Show responding UI - this will be handled by the UI layout
+            }
+            HomeworkMode.TRANSLATING -> {
+                // Translation in progress - TTS already handled in ViewModel
+            }
+            HomeworkMode.LISTENING_AUDIO -> {
+                // Audio playback in progress - no TTS needed
             }
             HomeworkMode.RECORDING_PHOTO -> {
                 // Check camera permission first
@@ -229,6 +286,13 @@ fun HomeworkScreen(
                                 // Cancel Gemma response
                                 viewModel.onHomeworkGesture(GestureType.TAP, ttsHelper)
                             }
+                            HomeworkMode.TRANSLATING -> {
+                                // Cannot interact during translation
+                            }
+                            HomeworkMode.LISTENING_AUDIO -> {
+                                // Allow stopping audio playback
+                                viewModel.onHomeworkGesture(GestureType.TAP, ttsHelper)
+                            }
                             else -> { /* No action for other modes */ }
                         }
                     },
@@ -238,7 +302,7 @@ fun HomeworkScreen(
                                 viewModel.onHomeworkGesture(GestureType.DOUBLE_TAP, ttsHelper)
                             }
                             HomeworkMode.RECORDING_VOICE -> {
-                                // Stop voice recording
+                                // Stop voice recording - treat double-tap as single tap
                                 viewModel.onHomeworkGesture(GestureType.TAP, ttsHelper)
                             }
                             HomeworkMode.ASKING_QUESTION -> {
@@ -249,6 +313,13 @@ fun HomeworkScreen(
                             }
                             HomeworkMode.GEMMA_RESPONDING -> {
                                 // Cancel Gemma response
+                                viewModel.onHomeworkGesture(GestureType.TAP, ttsHelper)
+                            }
+                            HomeworkMode.TRANSLATING -> {
+                                // Cannot interact during translation
+                            }
+                            HomeworkMode.LISTENING_AUDIO -> {
+                                // Allow stopping audio playback
                                 viewModel.onHomeworkGesture(GestureType.TAP, ttsHelper)
                             }
                             else -> { /* No action for other modes */ }
@@ -271,6 +342,13 @@ fun HomeworkScreen(
                             }
                             HomeworkMode.GEMMA_RESPONDING -> {
                                 // Cancel Gemma response
+                                viewModel.onHomeworkGesture(GestureType.TAP, ttsHelper)
+                            }
+                            HomeworkMode.TRANSLATING -> {
+                                // Cannot interact during translation
+                            }
+                            HomeworkMode.LISTENING_AUDIO -> {
+                                // Allow stopping audio playback
                                 viewModel.onHomeworkGesture(GestureType.TAP, ttsHelper)
                             }
                             else -> { /* No action for other modes */ }
@@ -365,7 +443,7 @@ fun HomeworkScreen(
             )
         ) {
             Text(
-                text = currentItem.question,
+                text = currentItem.getCurrentQuestion(state.language),
                 style = MaterialTheme.typography.titleMedium,
                 color = MaterialTheme.colorScheme.onSecondaryContainer,
                 modifier = Modifier.padding(20.dp),
@@ -399,6 +477,8 @@ fun HomeworkScreen(
                     HomeworkMode.RECORDING_PHOTO -> MaterialTheme.colorScheme.secondaryContainer
                     HomeworkMode.ASKING_QUESTION -> MaterialTheme.colorScheme.tertiaryContainer
                     HomeworkMode.GEMMA_RESPONDING -> MaterialTheme.colorScheme.inversePrimary
+                    HomeworkMode.TRANSLATING -> MaterialTheme.colorScheme.tertiaryContainer
+                    HomeworkMode.LISTENING_AUDIO -> MaterialTheme.colorScheme.secondaryContainer
                     else -> MaterialTheme.colorScheme.surface
                 },
                 contentColor = when (state.mode) {
@@ -407,6 +487,8 @@ fun HomeworkScreen(
                     HomeworkMode.RECORDING_PHOTO -> MaterialTheme.colorScheme.onSecondaryContainer
                     HomeworkMode.ASKING_QUESTION -> MaterialTheme.colorScheme.onTertiaryContainer
                     HomeworkMode.GEMMA_RESPONDING -> MaterialTheme.colorScheme.onSurface
+                    HomeworkMode.TRANSLATING -> MaterialTheme.colorScheme.onTertiaryContainer
+                    HomeworkMode.LISTENING_AUDIO -> MaterialTheme.colorScheme.onSecondaryContainer
                     else -> MaterialTheme.colorScheme.onSurface
                 }
             ),
@@ -477,10 +559,22 @@ fun HomeworkScreen(
                                 fontWeight = FontWeight.Bold
                             )
                         }
-                        Text(
-                            text = "Tap anywhere to cancel response",
-                            style = MaterialTheme.typography.bodyMedium
-                        )
+                    }
+                    HomeworkMode.TRANSLATING -> {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                strokeWidth = 2.dp
+                            )
+                            Text(
+                                text = LocalizedStrings.getString(LocalizedStrings.StringKey.TRANSLATING_FEEDBACK, state.language),
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
                     }
                     else -> {
                         Text(
@@ -524,7 +618,7 @@ fun HomeworkScreen(
             
             if (state.hasNextItem) {
                 Button(
-                    onClick = { viewModel.moveToNextHomeworkItem() },
+                    onClick = { viewModel.moveToNextHomeworkItem(ttsHelper, modelManager) },
                     modifier = Modifier.weight(1f)
                 ) {
                     Text("Next Question")
